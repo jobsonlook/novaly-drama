@@ -1,0 +1,18 @@
+# 本地配置与 Chrome 登录态（含 cookie，勿提交）
+.env
+session/
+sessions/
+data/
+
+# 构建产物
+/server
+/bin/
+/dist/
+*.exe
+
+# 系统与 IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

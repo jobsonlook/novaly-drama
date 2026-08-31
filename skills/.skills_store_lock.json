@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "skills": {
+    "drama-generator-pro": {
+      "name": "AI 漫剧全流程生成技能",
+      "zip_url": "https://api.skillhub.cn/api/v1/download?slug=drama-generator-pro",
+      "source": "community",
+      "version": "1.0.0",
+      "installedAt": "2026-08-01T09:39:32Z"
+    }
+  }
+}

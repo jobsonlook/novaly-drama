@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>豆包多账号管理</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --card: #fff;
+      --text: #1a1a1a;
+      --muted: #666;
+      --border: #ddd;
+      --accent: #2f6fed;
+      --warn: #b45309;
+      --ok: #0f7b3a;
+      --danger: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+    }
+    main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { font-size: 1.4rem; margin: 0 0 8px; }
+    .muted { color: var(--muted); font-size: 0.92rem; }
+    .banner {
+      background: #fff7ed;
+      border: 1px solid #fdba74;
+      color: var(--warn);
+      padding: 12px 14px;
+      border-radius: 8px;
+      margin: 16px 0;
+    }
+    .flash {
+      background: #ecfdf5;
+      border: 1px solid #6ee7b7;
+      color: var(--ok);
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin: 12px 0;
+    }
+    .error {
+      background: #fef2f2;
+      border: 1px solid #fca5a5;
+      color: var(--danger);
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin: 12px 0;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 20px 0 0;
+    }
+    .tabs {
+      display: flex;
+      gap: 4px;
+      padding: 4px;
+      background: #e8eaee;
+      border-radius: 10px;
+    }
+    .tab-btn {
+      appearance: none;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active {
+      background: var(--card);
+      color: var(--text);
+      box-shadow: 0 1px 2px rgba(0,0,0,.06);
+    }
+    .tab-btn .count {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 0 6px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      background: #dfe3ea;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .tab-btn.active .count {
+      background: #e8eefc;
+      color: var(--accent);
+    }
+    .tab-panel { display: none; margin-top: 16px; }
+    .tab-panel.active { display: block; }
+    .panel-hint { margin: 0 0 12px; }
+    .worker-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .worker-card {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 10px;
+      color: var(--text);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      font-size: 0.92rem;
+    }
+    th { background: #f0f2f5; font-weight: 600; }
+    tr:last-child td { border-bottom: none; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      background: #e8eefc;
+      color: var(--accent);
+    }
+    .badge.off { background: #f3f4f6; color: #6b7280; }
+    .badge.active { background: #dcfce7; color: var(--ok); }
+    form.inline { display: inline; }
+    .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    button, .btn {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    button.danger { color: var(--danger); border-color: #fca5a5; }
+    button.lg { padding: 8px 14px; font-size: 0.9rem; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 4px; }
+    input[type=text], input[type=number] {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.95rem;
+    }
+    .field { margin-bottom: 10px; }
+    code { font-size: 0.85em; background: #f0f2f5; padding: 1px 5px; border-radius: 4px; }
+    .prompt-cell {
+      max-width: 320px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.88rem;
+      max-height: 8.5em;
+      overflow: auto;
+    }
+    .media-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .media-row a.thumb {
+      display: block;
+      width: 88px;
+      height: 88px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      background: #f0f2f5;
+      flex-shrink: 0;
+    }
+    .media-row a.thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .media-row .result-link {
+      font-size: 0.85rem;
+      word-break: break-all;
+    }
+    .kind-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      background: #e8eefc;
+      color: var(--accent);
+    }
+    .kind-badge.video { background: #dcfce7; color: var(--ok); }
+    .pager {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 16px 0 8px;
+      padding: 12px 14px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .pager .pager-meta { color: var(--muted); font-size: 0.9rem; }
+    .pager .pager-nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .pager a, .pager span.page-num {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 0.88rem;
+    }
+    .pager a:hover { border-color: var(--accent); color: var(--accent); }
+    .pager span.page-num { background: #e8eefc; border-color: #c7d7f8; color: var(--accent); font-weight: 600; }
+    .pager a.disabled, .pager span.disabled {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, .45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 50;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      width: min(520px, 100%);
+      background: var(--card);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      box-shadow: 0 16px 40px rgba(0,0,0,.18);
+      padding: 18px 18px 16px;
+    }
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .modal-head h2 {
+      margin: 0;
+      font-size: 1.1rem;
+    }
+    .modal-close {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 1.35rem;
+      line-height: 1;
+      padding: 2px 6px;
+      cursor: pointer;
+    }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    body.modal-open { overflow: hidden; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>豆包多账号管理</h1>
+  <p class="muted">本地记账 Seedance 剩余额度（默认 {{.DefaultRemaining}}，Fast / Mini 共享；北京时间每天 0 点自动重置）。Mini 成功扣 1，Fast 成功扣 2；剩余 1 时 Fast 仍可生成（扣到 0，一天最多约 3 次 Fast）。扣到 0 会立刻切下一有余量账号并重启 Chrome。下一次任务开始前若当前账号剩余为 0，也会主动切号（不必等豆包「今日免费次数用完」提示）。可用环境变量 <code>DOUBAO_AUTO_RESTART_CHROME=0</code> 关闭自动重启。</p>
+
+  {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
+  {{if .NeedsRestart}}
+  <div class="banner">
+    首选账号：<strong>{{.Active.Name}}</strong>（{{.Active.SessionDir}}，剩余 {{.Active.FastRemaining}}）。
+    自动重启未成功或已关闭 — 请退出 Chrome 后执行 <code>./scripts/start-chrome.sh</code>（会读 <code>{{.ActiveSessionFile}}</code>）。
+  </div>
+  {{else if .Active}}
+    {{if gt .Active.FastRemaining 0}}
+    <div class="banner" style="background:#ecfdf5;border-color:#6ee7b7;color:var(--ok)">
+      首选账号：<strong>{{.Active.Name}}</strong> — Seedance 剩余 <strong>{{.Active.FastRemaining}}</strong> — <code>{{.Active.SessionDir}}</code>
+    </div>
+    {{else}}
+    <div class="banner" style="background:#fff7ed;border-color:#fdba74;color:#c2410c">
+      配置首选：<strong>{{.Active.Name}}</strong> — Seedance 剩余 <strong>0</strong> — 暂不参与生成；任务会自动使用下方有额度的 Worker。
+    </div>
+    {{end}}
+  {{else}}
+  <div class="banner">尚未选择账号。请先新增并选中一个账号。</div>
+  {{end}}
+
+  {{if .Workers}}
+  <div class="banner" style="background:#f8fafc">
+    <strong>实际运行中的 Chrome Worker</strong>
+    <div class="worker-list">
+      {{range .Workers}}
+      <span class="worker-card">
+        <code>:{{.CDPPort}}</code>
+        <strong>{{if .Name}}{{.Name}}{{else}}未绑定账号{{end}}</strong>
+        {{if .Busy}}<span class="badge active">生成中</span>{{else}}<span class="badge">空闲</span>{{end}}
+        {{if ge .Remaining 0}}<span class="muted">剩余 {{.Remaining}}</span>{{end}}
+      </span>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+
+  <div class="toolbar">
+    <div class="tabs" role="tablist">
+      <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-tab="accounts">
+        账号列表
+        <span class="count">{{len .Accounts}}</span>
+      </button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="history">
+        生成历史
+        <span class="count">{{.HistoryTotal}}</span>
+      </button>
+    </div>
+    <button type="button" class="primary lg" id="open-create-modal">新增账号</button>
+  </div>
+
+  <section class="tab-panel active" id="panel-accounts" role="tabpanel">
+    {{if .Accounts}}
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>名称</th>
+          <th>Session 目录</th>
+          <th>Seedance 剩余</th>
+          <th>状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Accounts}}
+        <tr>
+          <td>{{.ID}}</td>
+          <td>
+            {{.Name}}
+            {{if eq .ID $.ActiveID}}<span class="badge active">首选</span>{{end}}
+          </td>
+          <td><code>{{.SessionDir}}</code></td>
+          <td><strong>{{.FastRemaining}}</strong></td>
+          <td>
+            {{if .Enabled}}<span class="badge">启用</span>{{else}}<span class="badge off">停用</span>{{end}}
+          </td>
+          <td>
+            <div class="row-actions">
+              {{if ne .ID $.ActiveID}}
+              <form class="inline" method="post" action="/admin/accounts/{{.ID}}/select">
+                {{if $.AuthKey}}<input type="hidden" name="key" value="{{$.AuthKey}}">{{end}}
+                <button type="submit" class="primary">选用</button>
+              </form>
+              {{end}}
+              <form class="inline" method="post" action="/admin/accounts/{{.ID}}/reset">
+                {{if $.AuthKey}}<input type="hidden" name="key" value="{{$.AuthKey}}">{{end}}
+                <input type="hidden" name="remaining" value="{{$.DefaultRemaining}}">
+                <button type="submit">重置剩余为 {{$.DefaultRemaining}}</button>
+              </form>
+              <form class="inline" method="post" action="/admin/accounts/{{.ID}}/update">
+                {{if $.AuthKey}}<input type="hidden" name="key" value="{{$.AuthKey}}">{{end}}
+                <input type="hidden" name="name" value="{{.Name}}">
+                <input type="hidden" name="session_dir" value="{{.SessionDir}}">
+                <input type="hidden" name="fast_remaining" value="{{.FastRemaining}}">
+                {{if .Enabled}}
+                <input type="hidden" name="enabled" value="0">
+                <button type="submit">停用</button>
+                {{else}}
+                <input type="hidden" name="enabled" value="1">
+                <button type="submit">启用</button>
+                {{end}}
+              </form>
+              <form class="inline" method="post" action="/admin/accounts/{{.ID}}/delete" onsubmit="return confirm('确认删除 {{.Name}}？');">
+                {{if $.AuthKey}}<input type="hidden" name="key" value="{{$.AuthKey}}">{{end}}
+                <button type="submit" class="danger">删除</button>
+              </form>
+            </div>
+            <details style="margin-top:8px">
+              <summary class="muted">编辑</summary>
+              <form method="post" action="/admin/accounts/{{.ID}}/update" style="margin-top:8px">
+                {{if $.AuthKey}}<input type="hidden" name="key" value="{{$.AuthKey}}">{{end}}
+                <div class="grid">
+                  <div class="field">
+                    <label>名称</label>
+                    <input type="text" name="name" value="{{.Name}}" required>
+                  </div>
+                  <div class="field">
+                    <label>Session 目录</label>
+                    <input type="text" name="session_dir" value="{{.SessionDir}}" required>
+                  </div>
+                  <div class="field">
+                    <label>Seedance 剩余（Fast/Mini 共享；Mini 扣 1 / Fast 扣 2）</label>
+                    <input type="number" name="fast_remaining" min="0" value="{{.FastRemaining}}" required>
+                  </div>
+                  <div class="field">
+                    <label>启用 (1/0)</label>
+                    <input type="number" name="enabled" min="0" max="1" value="{{if .Enabled}}1{{else}}0{{end}}" required>
+                  </div>
+                </div>
+                <button type="submit" class="primary">保存</button>
+              </form>
+            </details>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="muted">暂无账号。点击右上角「新增账号」添加。</p>
+    {{end}}
+  </section>
+
+  <section class="tab-panel" id="panel-history" role="tabpanel">
+    <p class="muted panel-hint">全部成功的文生图 / 视频任务（提示词与图片资源）。图片会尽量落盘到 <code>data/gen-history/</code>，避免 CDN 过期。每页 {{.HistoryPageSize}} 条。</p>
+    {{if .Generations}}
+    <div class="pager">
+      <div class="pager-meta">第 {{.HistoryFrom}}–{{.HistoryTo}} 条，共 {{.HistoryTotal}} 条 · 第 {{.HistoryPage}} / {{.HistoryTotalPages}} 页</div>
+      <div class="pager-nav">
+        {{if .HistoryHasPrev}}
+        <a href="/admin?page={{.HistoryPrevPage}}{{if .AuthKey}}&amp;key={{.AuthKey}}{{end}}#history">上一页</a>
+        {{else}}
+        <span class="disabled">上一页</span>
+        {{end}}
+        <span class="page-num">{{.HistoryPage}}</span>
+        {{if .HistoryHasNext}}
+        <a href="/admin?page={{.HistoryNextPage}}{{if .AuthKey}}&amp;key={{.AuthKey}}{{end}}#history">下一页</a>
+        {{else}}
+        <span class="disabled">下一页</span>
+        {{end}}
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>时间</th>
+          <th>账号</th>
+          <th>类型</th>
+          <th>提示词</th>
+          <th>图片资源</th>
+          <th>结果</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Generations}}
+        <tr>
+          <td style="white-space:nowrap">{{.CreatedAt.Local.Format "01-02 15:04"}}</td>
+          <td>
+            {{if .AccountName}}
+            <strong>{{.AccountName}}</strong>
+            {{if .AccountID}}<div class="muted">#{{.AccountID}}</div>{{end}}
+            {{else}}
+            <span class="muted">—</span>
+            {{end}}
+          </td>
+          <td>
+            {{if eq .Kind "video"}}
+            <span class="kind-badge video">视频</span>
+            {{else}}
+            <span class="kind-badge">图片</span>
+            {{end}}
+          </td>
+          <td><div class="prompt-cell">{{.Prompt}}</div></td>
+          <td>
+            {{if .Images}}
+            <div class="media-row">
+              {{range .Images}}
+              <a class="thumb" href="{{.}}" target="_blank" rel="noopener">
+                <img src="{{.}}" alt="generated" loading="lazy">
+              </a>
+              {{end}}
+            </div>
+            {{else}}
+            <span class="muted">—</span>
+            {{end}}
+          </td>
+          <td>
+            {{if .ResultURL}}
+            <a class="result-link" href="{{.ResultURL}}" target="_blank" rel="noopener">打开视频</a>
+            {{if .TaskID}}<div class="muted" style="margin-top:4px"><code>{{.TaskID}}</code></div>{{end}}
+            {{else if .Images}}
+            <span class="muted">见图片</span>
+            {{else}}
+            <span class="muted">—</span>
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    <div class="pager">
+      <div class="pager-meta">第 {{.HistoryFrom}}–{{.HistoryTo}} 条，共 {{.HistoryTotal}} 条 · 第 {{.HistoryPage}} / {{.HistoryTotalPages}} 页</div>
+      <div class="pager-nav">
+        {{if .HistoryHasPrev}}
+        <a href="/admin?page={{.HistoryPrevPage}}{{if .AuthKey}}&amp;key={{.AuthKey}}{{end}}#history">上一页</a>
+        {{else}}
+        <span class="disabled">上一页</span>
+        {{end}}
+        <span class="page-num">{{.HistoryPage}}</span>
+        {{if .HistoryHasNext}}
+        <a href="/admin?page={{.HistoryNextPage}}{{if .AuthKey}}&amp;key={{.AuthKey}}{{end}}#history">下一页</a>
+        {{else}}
+        <span class="disabled">下一页</span>
+        {{end}}
+      </div>
+    </div>
+    {{else}}
+    <p class="muted">暂无生成记录。成功调用文生图或视频接口后会出现在这里。</p>
+    {{end}}
+  </section>
+</main>
+
+<div class="modal-backdrop" id="create-modal" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="create-modal-title">
+    <div class="modal-head">
+      <h2 id="create-modal-title">新增账号</h2>
+      <button type="button" class="modal-close" id="close-create-modal" aria-label="关闭">&times;</button>
+    </div>
+    <form method="post" action="/admin/accounts">
+      {{if .AuthKey}}<input type="hidden" name="key" value="{{.AuthKey}}">{{end}}
+      <div class="grid">
+        <div class="field">
+          <label>名称</label>
+          <input type="text" name="name" placeholder="alice" required>
+        </div>
+        <div class="field">
+          <label>Session 目录</label>
+          <input type="text" name="session_dir" placeholder="./sessions/alice" required>
+        </div>
+        <div class="field">
+          <label>Seedance 剩余（默认 {{.DefaultRemaining}}，Fast/Mini 共享；Mini 扣 1 / Fast 扣 2）</label>
+          <input type="number" name="fast_remaining" min="0" value="{{.DefaultRemaining}}">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="cancel-create-modal">取消</button>
+        <button type="submit" class="primary">添加</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  var tabBtns = document.querySelectorAll('.tab-btn');
+  var panels = {
+    accounts: document.getElementById('panel-accounts'),
+    history: document.getElementById('panel-history')
+  };
+
+  function activateTab(name) {
+    if (!panels[name]) name = 'accounts';
+    tabBtns.forEach(function (btn) {
+      var on = btn.getAttribute('data-tab') === name;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    Object.keys(panels).forEach(function (key) {
+      panels[key].classList.toggle('active', key === name);
+    });
+    try {
+      history.replaceState(null, '', '#' + name);
+    } catch (e) {}
+  }
+
+  tabBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      activateTab(btn.getAttribute('data-tab'));
+    });
+  });
+
+  var hash = (location.hash || '').replace(/^#/, '');
+  var params = new URLSearchParams(location.search || '');
+  if (hash === 'history' || hash === 'accounts') {
+    activateTab(hash);
+  } else if (params.has('page')) {
+    activateTab('history');
+  }
+
+  // flash/error are one-time redirect messages. Remove them after this render
+  // so a later refresh cannot show an obsolete account-selection result.
+  if (params.has('flash') || params.has('error')) {
+    params.delete('flash');
+    params.delete('error');
+    var cleanQuery = params.toString();
+    try {
+      history.replaceState(null, '', location.pathname + (cleanQuery ? '?' + cleanQuery : '') + location.hash);
+    } catch (e) {}
+  }
+
+  var modal = document.getElementById('create-modal');
+  var openBtn = document.getElementById('open-create-modal');
+  var closeBtn = document.getElementById('close-create-modal');
+  var cancelBtn = document.getElementById('cancel-create-modal');
+  var nameInput = modal.querySelector('input[name="name"]');
+
+  function openModal() {
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+    setTimeout(function () {
+      if (nameInput) nameInput.focus();
+    }, 0);
+  }
+
+  function closeModal() {
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('modal-open');
+  }
+
+  openBtn.addEventListener('click', openModal);
+  closeBtn.addEventListener('click', closeModal);
+  cancelBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function (e) {
+    if (e.target === modal) closeModal();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && modal.classList.contains('open')) {
+      closeModal();
+    }
+  });
+})();
+</script>
+</body>
+</html>

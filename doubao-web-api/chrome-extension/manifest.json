@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "豆包无水印下载",
+  "version": "1.0.0",
+  "description": "在豆包对话页一键下载无「豆包AI生成」水印的视频",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "豆包无水印下载",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "permissions": ["downloads", "storage", "scripting"],
+  "host_permissions": [
+    "https://www.doubao.com/*",
+    "https://doubao.com/*",
+    "https://*.snssdk.com/*",
+    "https://*.douyinvod.com/*",
+    "https://*.douyin.com/*",
+    "https://*.byteimg.com/*",
+    "https://*.ivolces.com/*",
+    "https://*.bytedance.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.doubao.com/*", "https://doubao.com/*"],
+      "js": ["content/unwatermark.js", "content/content.js"],
+      "run_at": "document_start",
+      "css": ["content/panel.css"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["content/inject.js"],
+      "matches": ["https://www.doubao.com/*", "https://doubao.com/*"]
+    }
+  ]
+}
