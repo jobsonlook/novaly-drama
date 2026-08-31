@@ -136,7 +136,7 @@ func main() {
 	srv.SetPool(workers)
 
 	httpServer := &http.Server{
-		Addr:    "127.0.0.1:" + cfg.Port,
+		Addr:    localListenAddress(cfg.Port),
 		Handler: localShutdownHandler(srv.Handler(), os.Getenv("DOUBAO_LOCAL_SHUTDOWN_TOKEN"), stop),
 		// ReadHeaderTimeout bounds slowloris; ReadTimeout must cover large
 		// multipart uploads (Novaly ref images can be multi‑MB each).

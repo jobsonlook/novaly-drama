@@ -1,0 +1,25 @@
+services:
+  novaly:
+    build: .
+    image: novaly-drama:local
+    ports:
+      - "127.0.0.1:8085:8085"
+      - "127.0.0.1:8086:8086"
+      - "127.0.0.1:6080:6080"
+    shm_size: "1gb"
+    pids_limit: 512
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    stop_grace_period: 60s
+    volumes:
+      - novaly-data:/app/backend/data
+      - doubao-data:/app/doubao-web-api/data
+      - doubao-session:/app/doubao-web-api/session
+
+volumes:
+  novaly-data:
+  doubao-data:
+  doubao-session:

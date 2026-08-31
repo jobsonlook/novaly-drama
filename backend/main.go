@@ -23,7 +23,7 @@ func main() {
 	router := routes.New(db, cfg)
 	manager := localservice.New()
 	manager.Register(router)
-	server := &http.Server{Addr: "127.0.0.1:" + cfg.Port, Handler: router, ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{Addr: cfg.ListenHost + ":" + cfg.Port, Handler: router, ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {

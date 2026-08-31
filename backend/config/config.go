@@ -6,6 +6,7 @@ import (
 )
 
 type Config struct {
+	ListenHost                                                                                                                                          string
 	Port, DatabasePath, ArkAPIKey, ArkModel, ArkBaseURL, DoubaoWebBaseURL, DoubaoWebAPIKey, PixAPIAPIKey, PixAPIBaseURL, PixAPIHTTPProxy, PublicBaseURL string
 	XaisAPIKey, XaisBaseURL, DeepSeekAPIKey, DeepSeekBaseURL                                                                                            string
 	AccessToken                                                                                                                                         string
@@ -19,6 +20,7 @@ type Config struct {
 func Load() Config {
 	loadDotEnv("../.env")
 	return Config{
+		ListenHost:         env("NOVALY_LISTEN_HOST", "127.0.0.1"),
 		Port:               env("PORT", "8085"),
 		DatabasePath:       env("DATABASE_PATH", "data/novaly.db"),
 		ArkAPIKey:          os.Getenv("ARK_API_KEY"),

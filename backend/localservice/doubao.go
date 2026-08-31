@@ -103,6 +103,11 @@ func (m *Manager) Start() error {
 		}
 		cmd.Env = append(cmd.Env, e)
 	}
+	listenHost := os.Getenv("NOVALY_LISTEN_HOST")
+	if listenHost == "" {
+		listenHost = "127.0.0.1"
+	}
+	cmd.Env = append(cmd.Env, "DOUBAO_LISTEN_HOST="+listenHost)
 	cmd.Env = append(cmd.Env, "DOUBAO_LOCAL_SHUTDOWN_TOKEN="+m.shutdownToken, "PORT=8086", "DOUBAO_CDP_PORT=9322", "DOUBAO_CDP_URL=http://127.0.0.1:9322", "MAX_PARALLEL_VIDEO=2", "DOUBAO_SESSION_DIR="+filepath.Join(m.root, "session"))
 	if err := cmd.Start(); err != nil {
 		log.Close()

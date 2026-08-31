@@ -17,3 +17,5 @@ migration-backups/
 *.db-wal
 *.pem
 *.key
+backup/
+backups/
