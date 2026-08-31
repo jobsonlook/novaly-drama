@@ -2,7 +2,7 @@
 
 本方案将 Novaly、doubao-web-api、Chromium、FFmpeg 和浏览器登录桌面放进同一个容器。不需要 COS/TOS、外部数据库或宿主机 Chrome；AI 仍通过联网服务生成。
 
-> 目前提供源码构建方案，尚未发布预构建容器镜像。容器集成仍需完整生成流程验证；不要把它当作生产环境可用性承诺。账号登录与生成额度取决于豆包网页。macOS / Windows 使用 Docker Desktop 的 Linux 容器模式，Linux 使用 Docker Engine + Compose 插件。
+> 目前提供源码构建方案，尚未发布预构建容器镜像。已通过 Compose 配置检查、前端生产构建、两个 Go 服务的回归测试及 Linux ARM64 编译。本次本地镜像构建因基础镜像下载过慢未能完成；容器启动、浏览器登录和完整生成流程仍待验证，不要把它当作生产环境可用性承诺。账号登录与生成额度取决于豆包网页。macOS / Windows 使用 Docker Desktop 的 Linux 容器模式，Linux 使用 Docker Engine + Compose 插件。
 
 [返回 README](../README.md)
 
