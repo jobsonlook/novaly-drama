@@ -25,7 +25,7 @@ import (
 func main() {
 	cfg := config.Load()
 
-	releaseLock, err := acquireProcessLock()
+	releaseLock, err := acquireProcessLock(cfg.CDPPort)
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -137,7 +137,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:    "127.0.0.1:" + cfg.Port,
-		Handler: srv.Handler(),
+		Handler: localShutdownHandler(srv.Handler(), os.Getenv("DOUBAO_LOCAL_SHUTDOWN_TOKEN"), stop),
 		// ReadHeaderTimeout bounds slowloris; ReadTimeout must cover large
 		// multipart uploads (Novaly ref images can be multi‑MB each).
 		ReadHeaderTimeout: 15 * time.Second,
@@ -186,8 +186,8 @@ func cdpVideoItemsToResults(items []cdp.VideoItem) []doubao.VideoResult {
 	return out
 }
 
-func acquireProcessLock() (func(), error) {
-	lockPath := filepath.Join(os.TempDir(), "doubao-web-api-cdp.lock")
+func acquireProcessLock(port int) (func(), error) {
+	lockPath := filepath.Join(os.TempDir(), fmt.Sprintf("doubao-web-api-cdp-%d.lock", port))
 	if err := removeStaleProcessLock(lockPath); err != nil {
 		return nil, err
 	}
@@ -228,12 +228,4 @@ func readLockPID(lockPath string) int {
 	}
 	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
 	return pid
-}
-
-func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
 }

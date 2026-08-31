@@ -21,9 +21,20 @@ Novaly Drama 提供浏览器操作界面，内置 `doubao-web-api`。你可以�
 
 仓库提供的是程序源码，**不附带演示项目、视频素材、API Key 或豆包登录账号**。第一次启动看到空的项目列表是正常的。
 
+## 下载已编译的运行包
+
+不想安装 Go / Node.js，可以到 [Releases](https://github.com/jobsonlook/novaly-drama/releases) 下载与你的系统对应的 ZIP，并完整解压到有写入权限的目录。
+
+- **macOS Apple Silicon：** 使用 `macos-arm64` 包，双击 `启动 Novaly.command`。
+- **Windows 10/11 x64 预览版：** 使用 `windows-amd64` 包，双击 `start.bat`；无需 Git Bash、Go、Node.js 或 PowerShell 脚本权限调整。仍需安装 Google Chrome，视频处理需将 FFmpeg/ffprobe 加入 PATH。
+
+Windows 包在 macOS 上交叉编译，尚未经过 Windows 真机完整生成验证；目前按预览版提供。程序未做代码签名，系统可能提示安全检查，请确认来源，不要关闭系统防护。Windows 关闭终端前，请先在设置页停止豆包服务，再按 Ctrl+C 退出工作台；不要强行关闭正在生成任务的窗口。
+
+已编译包具体操作见压缩包内的 README。下方的安装与编译步骤供使用源码的用户参考。
+
 ## 第一次使用：从下载安装到打开页面
 
-下面以 **macOS** 为例，这是当前已实际验证启动的环境。仓库中有 Linux 的 Chrome 启动逻辑，但完整使用流程尚未在 Linux 验证；目前没有 Windows 原生一键启动脚本。
+下面以 **macOS** 为例，这是当前已实际验证启动的环境。仓库中有 Linux 的 Chrome 启动逻辑，但完整使用流程尚未在 Linux 验证；另提供 Windows x64 预览运行包，见下方说明。
 
 ### 1. 准备运行环境
 

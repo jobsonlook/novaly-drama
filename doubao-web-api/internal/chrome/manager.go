@@ -152,10 +152,18 @@ func (m *Manager) startChrome() error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(script); err != nil {
-		return fmt.Errorf("chrome script: %w", err)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd, err = windowsChromeCommand(m.SessionDir, m.CDPPort)
+		if err != nil {
+			return err
+		}
+	} else {
+		if _, err := os.Stat(script); err != nil {
+			return fmt.Errorf("chrome script: %w", err)
+		}
+		cmd = exec.Command(script)
 	}
-	cmd := exec.Command(script)
 	cmd.Dir = filepath.Dir(filepath.Dir(script)) // repo root when script is scripts/start-chrome.sh
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("DOUBAO_CDP_PORT=%d", m.CDPPort),
@@ -225,6 +233,9 @@ func portFromURL(cdpURL string) int {
 }
 
 func killListenersOnPort(port int) error {
+	if runtime.GOOS == "windows" {
+		return stopWindowsChrome(port)
+	}
 	pids, err := listenersOnPort(port)
 	if err != nil {
 		return err
@@ -263,7 +274,11 @@ func killListenersOnPort(port int) error {
 
 func listenersOnPort(port int) ([]int, error) {
 	if runtime.GOOS == "windows" {
-		return nil, fmt.Errorf("auto restart chrome is not supported on windows")
+		out, err := exec.Command("netstat.exe", "-ano", "-p", "TCP").Output()
+		if err != nil {
+			return nil, err
+		}
+		return parseWindowsListeners(string(out), port), nil
 	}
 	out, err := exec.Command("lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-t").Output()
 	if err != nil {

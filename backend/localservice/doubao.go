@@ -1,6 +1,8 @@
 package localservice
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/gin-gonic/gin"
@@ -10,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -18,12 +21,13 @@ import (
 
 // Manager owns only the child it starts; it never kills a process found on a port.
 type Manager struct {
-	mu        sync.Mutex
-	cmd       *exec.Cmd
-	done      chan struct{}
-	lastError string
-	stopping  bool
-	root      string
+	mu            sync.Mutex
+	cmd           *exec.Cmd
+	done          chan struct{}
+	lastError     string
+	stopping      bool
+	root          string
+	shutdownToken string
 }
 
 func New() *Manager { root, _ := filepath.Abs("../doubao-web-api"); return &Manager{root: root} }
@@ -68,6 +72,9 @@ func (m *Manager) Start() error {
 		return fmt.Errorf("8086 端口已被占用；不会接管或停止已有服务")
 	}
 	binary := filepath.Join(m.root, "bin/doubao-web-api")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
 	if _, err := os.Stat(binary); err != nil {
 		return fmt.Errorf("请先运行 ./scripts/build.sh 构建豆包服务")
 	}
@@ -78,6 +85,12 @@ func (m *Manager) Start() error {
 	if err != nil {
 		return err
 	}
+	token := make([]byte, 32)
+	if _, err := rand.Read(token); err != nil {
+		log.Close()
+		return err
+	}
+	m.shutdownToken = hex.EncodeToString(token)
 	cmd := exec.Command(binary)
 	cmd.Dir = m.root
 	cmd.Stdout = log
@@ -90,7 +103,7 @@ func (m *Manager) Start() error {
 		}
 		cmd.Env = append(cmd.Env, e)
 	}
-	cmd.Env = append(cmd.Env, "PORT=8086", "DOUBAO_CDP_PORT=9322", "DOUBAO_CDP_URL=http://127.0.0.1:9322", "MAX_PARALLEL_VIDEO=2", "DOUBAO_SESSION_DIR="+filepath.Join(m.root, "session"))
+	cmd.Env = append(cmd.Env, "DOUBAO_LOCAL_SHUTDOWN_TOKEN="+m.shutdownToken, "PORT=8086", "DOUBAO_CDP_PORT=9322", "DOUBAO_CDP_URL=http://127.0.0.1:9322", "MAX_PARALLEL_VIDEO=2", "DOUBAO_SESSION_DIR="+filepath.Join(m.root, "session"))
 	if err := cmd.Start(); err != nil {
 		log.Close()
 		return err
@@ -119,11 +132,30 @@ func (m *Manager) Stop() error {
 		m.mu.Unlock()
 		return nil
 	}
-	cmd, done := m.cmd, m.done
+	cmd, done, token := m.cmd, m.done, m.shutdownToken
 	m.stopping = true
 	m.mu.Unlock()
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil && err != os.ErrProcessDone {
-		return err
+	var err error
+	if runtime.GOOS == "windows" {
+		req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8086/internal/local-shutdown", nil)
+		req.Header.Set("X-Novaly-Shutdown", token)
+		client := http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}}
+		var res *http.Response
+		res, err = client.Do(req)
+		if res != nil {
+			res.Body.Close()
+			if res.StatusCode != http.StatusAccepted {
+				err = fmt.Errorf("停止服务失败 (HTTP %d)", res.StatusCode)
+			}
+		}
+	} else {
+		err = cmd.Process.Signal(syscall.SIGTERM)
+	}
+	if err != nil && err != os.ErrProcessDone {
+		m.mu.Lock()
+		m.stopping = false
+		m.mu.Unlock()
+		return fmt.Errorf("暂时无法停止豆包服务；若仍在启动，请等启动完成后重试: %w", err)
 	}
 	select {
 	case <-done:
