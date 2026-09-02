@@ -505,10 +505,22 @@ func (b *Browser) reattachBestTab(ctx context.Context) error {
 		tab = waitForTab(ctx, b.cdpURL, 5*time.Second, findDoubaoTab)
 	}
 	if tab == nil {
+		// Refresh after waiting: Chrome may have opened a normal page while we
+		// were waiting for a Doubao tab.
+		tabs = listTabs(ctx, b.cdpURL)
 		tab = findUsablePageTab(tabs)
 	}
 	if tab == nil {
-		return fmt.Errorf("no usable chrome tab for doubao")
+		// A worker can outlive its last page (for example, the user closes the
+		// second Chrome window while the pool keeps the worker). Start() already
+		// creates a tab in this situation; runtime re-attachment must do the
+		// same or the stale worker will fail every later task.
+		log.Printf("cdp: no usable page tab during re-attach, opening %s", chatURL)
+		opened, err := openTabAtURL(ctx, b.cdpURL, chatURL)
+		if err != nil {
+			return fmt.Errorf("open doubao tab during re-attach: %w", err)
+		}
+		tab = opened
 	}
 	if _, err := b.connectToTab(ctx, tab); err != nil {
 		return err
