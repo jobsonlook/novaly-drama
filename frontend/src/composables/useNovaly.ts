@@ -3717,10 +3717,22 @@ export function useNovaly() {
     })
   }
   function shotRefResourceName(filename?: string) {
-    const base = (filename || '').replace(/\.[^.]+$/, '').trim()
-    if (base) return base
-    const n = (others.value.length + 1).toString().padStart(2, '0')
-    return `参考图 ${n}`
+    const fallback = `参考图 ${(others.value.length + 1).toString().padStart(2, '0')}`
+    const base = (filename || '').replace(/\.[^.]+$/, '').trim() || fallback
+    // Clipboard images on macOS are commonly all named "image.png". The
+    // backend intentionally treats resources with the same type + name as one
+    // canonical resource, so reusing that name overwrites the previous file
+    // and every shot referencing it appears to contain the same image.
+    const existing = new Set(
+      (active.value?.resources || [])
+        .filter(item => item.type === 'other')
+        .map(item => item.name.trim().toLocaleLowerCase()),
+    )
+    if (!existing.has(base.toLocaleLowerCase())) return base
+    for (let suffix = 2; ; suffix += 1) {
+      const candidate = `${base} ${suffix}`
+      if (!existing.has(candidate.toLocaleLowerCase())) return candidate
+    }
   }
   async function uploadShotRefImage(shot: Shot, imageData: string, name: string) {
     if (!active.value) return
