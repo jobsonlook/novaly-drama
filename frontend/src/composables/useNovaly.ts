@@ -1433,9 +1433,35 @@ export function useNovaly() {
     const page = Math.min(shotPage.value, maxPage)
     await loadShotPage(page, { force: true })
   }
+  function shotUsesDoubaoWebAPI(shot: Shot): boolean {
+    const modelId = shot.videoModelId || defaultVideoModelId.value
+    if (!modelId) return false
+    const model = videoModels.value.find(item => item.id === modelId)
+    if (!model) return false
+    return providers.value.some(provider =>
+      provider.id === model.providerId && provider.slug === 'doubao-web-api',
+    )
+  }
+  async function ensureDoubaoWebAPIReady(shot: Shot): Promise<boolean> {
+    if (!shotUsesDoubaoWebAPI(shot)) return true
+    try {
+      const status = await api('/local/doubao')
+      if (status?.ready) return true
+    } catch {
+      // Show the same actionable prompt when the local status cannot be read.
+    }
+    askConfirm({
+      title: 'doubao-web-api 未启动',
+      message: '当前视频模型使用豆包网页 API。请先前往设置中心启动 doubao-web-api，等待状态显示“运行中”后再生成视频。',
+      confirmText: '前往设置中心',
+      onConfirm: () => openSettings('providers'),
+    })
+    return false
+  }
   async function generateShot(shot: Shot) {
     if (!shot.script.trim()) { error.value = '请先填写分镜描述'; return }
     if (!shot.refs.length) { error.value = '请添加至少一张参考图（角色或场景）'; return }
+    if (!await ensureDoubaoWebAPIReady(shot)) return
     expandShot(shot.id)
     generating.value = shot.id
     error.value = ''
