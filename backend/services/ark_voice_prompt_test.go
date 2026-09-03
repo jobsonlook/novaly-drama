@@ -36,6 +36,13 @@ func TestBuildVideoPromptIncludesVoices(t *testing.T) {
 			t.Fatalf("prompt missing %q: %s", part, got)
 		}
 	}
+	if strings.Count(got, VideoSpeechConstraint) != 2 {
+		t.Fatalf("dialogue rule should be repeated at prompt tail, got %s", got)
+	}
+	wantSuffix := VideoSpeechConstraint + "\n" + VideoNoSubtitleConstraint + "\n" + NoLogoConstraint
+	if !strings.HasSuffix(got, wantSuffix) {
+		t.Fatalf("dialogue prompt should end with speech then subtitle rules, got %s", got)
+	}
 }
 
 func TestBuildVideoPromptWithoutDialogueBansInventedSpeech(t *testing.T) {

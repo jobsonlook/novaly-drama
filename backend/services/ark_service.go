@@ -976,9 +976,13 @@ func BuildVideoPrompt(input VideoInput) string {
 		ratio = "16:9"
 	}
 	parts = append(parts, "视频比例为"+ratio)
-	if !hasSpeech {
-		// Repeat at the tail because long multi-reference prompts tend to weight
-		// their final instructions more heavily.
+	// Repeat the applicable audio rule at the tail because long multi-reference
+	// prompts tend to weight their final instructions more heavily. Previously
+	// only silent shots repeated their rule here, so dialogue instructions could
+	// be buried by the look/reference constraints appended after the script.
+	if hasSpeech {
+		parts = append(parts, VideoSpeechConstraint)
+	} else {
 		parts = append(parts, VideoNoSpeechConstraint)
 	}
 	// Keep the no-subtitle rule as the final instruction as well. Some video
