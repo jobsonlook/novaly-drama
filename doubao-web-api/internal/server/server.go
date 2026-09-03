@@ -202,33 +202,22 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.doubao.UploadMedia(r.Context(), data, filename)
-	if err != nil {
-		log.Printf("upload media failed: %v", err)
-		writeError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	s.localMedia.put(result.URI, data, filename, result.Format)
-
-	cdnURL := result.URL
-	if cdnURL != "" {
-		cdnURL = s.buildProxyURL(r, cdnURL)
-	}
-
-	objectType := "file.upload"
-	if doubao.IsAudioFile(filename) {
-		objectType = "audio.upload"
-	} else {
-		objectType = "image.upload"
-	}
+	// Video generation attaches reference images through the visible Doubao UI.
+	// Keep them locally until task creation instead of first calling Doubao's
+	// private upload endpoint. That redundant pre-upload can return the opaque
+	// "系统错误" response and prevent the working UI upload from running.
+	id := uuid.New().String()
+	uri := localImagePrefix + id
+	format := doubao.MediaExt(filename)
+	s.localMedia.put(id, data, filename, format)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":     result.URI,
-		"object": objectType,
-		"uri":    result.URI,
-		"url":    cdnURL,
-		"name":   result.Name,
-		"format": result.Format,
+		"id":     uri,
+		"object": "image.upload",
+		"uri":    uri,
+		"url":    "",
+		"name":   filename,
+		"format": format,
 	})
 }
 

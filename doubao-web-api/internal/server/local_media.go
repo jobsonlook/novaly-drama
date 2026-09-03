@@ -5,7 +5,10 @@ import (
 	"sync"
 )
 
-const localAudioPrefix = "local-audio:"
+const (
+	localAudioPrefix = "local-audio:"
+	localImagePrefix = "local-image:"
+)
 
 type localMediaEntry struct {
 	Data     []byte
@@ -38,6 +41,8 @@ func (s *localMediaStore) take(uri string) (localMediaEntry, bool) {
 	key := uri
 	if strings.HasPrefix(uri, localAudioPrefix) {
 		key = strings.TrimPrefix(uri, localAudioPrefix)
+	} else if strings.HasPrefix(uri, localImagePrefix) {
+		key = strings.TrimPrefix(uri, localImagePrefix)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
