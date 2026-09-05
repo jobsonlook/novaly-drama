@@ -1702,9 +1702,12 @@ func selectVideoDurationOnce(ctx context.Context, wantSec int) error {
 			if (!isVisible(el)) continue;
 			const r = el.getBoundingClientRect();
 			if (r.width < 8 || r.height < 8) continue;
-			const min = Number(el.min || el.getAttribute('aria-valuemin') || 4);
-			const max = Number(el.max || el.getAttribute('aria-valuemax') || 15);
-			if (!(min <= 4 && max >= 15)) continue;
+			const min = Number(el.min || el.getAttribute('aria-valuemin') || 0);
+			const max = Number(el.max || el.getAttribute('aria-valuemax') || 11);
+			// The current Radix slider exposes indexes 0–11 while its labels map
+			// those indexes to 4–15 seconds. Older native sliders may expose the
+			// actual seconds, so accept either representation.
+			if (!((min === 0 && max >= 11) || (min <= 4 && max >= 15))) continue;
 			const parentText = (el.parentElement?.parentElement?.innerText || '').replace(/\s+/g, ' ');
 			let score = /时长/.test(parentText) ? 0 : 2;
 			if (/4s/.test(parentText) && /15s/.test(parentText)) score -= 1;
