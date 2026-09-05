@@ -17,6 +17,7 @@ import (
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/kb"
 )
 
 type VideoItem struct {
@@ -49,7 +50,7 @@ type VideoUIOptions struct {
 	RefAudioData     []byte
 	RefAudioFilename string
 	Timeout          time.Duration
-	Duration         int64  // 视频时长（秒）：5/10/15，0 或未传时默认 10；其它值就近映射
+	Duration         int64  // 视频时长（秒）：4–15，0 或未传时默认 10；越界值会截到范围内
 	Model            string // fast / mini，默认 fast
 	OnETA            func(VideoETA)
 }
@@ -57,28 +58,24 @@ type VideoUIOptions struct {
 const (
 	DefaultVideoDurationSec = 10
 	DefaultVideoUIModel     = "fast"
+	MinVideoDurationSec     = 4
+	MaxVideoDurationSec     = 15
 )
-
-// Allowed Doubao Seedance UI durations (chip labels: 5s / 10s / 15s).
-var allowedVideoDurationsSec = []int{5, 10, 15}
 
 func normalizeVideoDurationSec(sec int) int {
 	if sec <= 0 {
 		return DefaultVideoDurationSec
 	}
-	// Generate enough source material for exact local trimming. Mapping 7s to
-	// the nearest 5s can never produce a 7s final video; use the next supported
-	// Seedance duration instead.
-	for _, d := range allowedVideoDurationsSec {
-		if sec <= d {
-			return d
-		}
+	if sec < MinVideoDurationSec {
+		return MinVideoDurationSec
 	}
-	return allowedVideoDurationsSec[len(allowedVideoDurationsSec)-1]
+	if sec > MaxVideoDurationSec {
+		return MaxVideoDurationSec
+	}
+	return sec
 }
 
-// NormalizeVideoDurationSec rounds API duration up to a Doubao-supported
-// 5 / 10 / 15 second source duration so callers can trim to the exact request.
+// NormalizeVideoDurationSec clamps API duration to Doubao's current 4–15s UI range.
 func NormalizeVideoDurationSec(sec int) int {
 	return normalizeVideoDurationSec(sec)
 }
@@ -1587,7 +1584,7 @@ func selectVideoModelOnce(ctx context.Context, want string) error {
 	return fmt.Errorf("model option not found: %s", videoModelUILabel(want))
 }
 
-// ensureVideoDuration selects the toolbar duration chip (5s/10s/15s) and keeps
+// ensureVideoDuration selects the toolbar duration control (4–15s) and keeps
 // the LauZzL-style request hook in sync.
 func ensureVideoDuration(ctx context.Context, durationSec int) error {
 	want := normalizeVideoDurationSec(durationSec)
@@ -1608,17 +1605,17 @@ func ensureVideoDuration(ctx context.Context, durationSec int) error {
 		log.Printf("generate_video: select duration %ds", want)
 	}
 	if err := selectVideoDurationOnce(ctx, want); err != nil {
-		// Chip may be missing on some layouts; request hook still forces duration.
-		log.Printf("generate_video: duration chip select: %v (hook still forces %ds)", err, want)
-		return nil
+		return fmt.Errorf("select duration %ds: %w", want, err)
 	}
 	after, _ := readCurrentVideoDuration(ctx)
 	if after == want {
 		log.Printf("generate_video: duration set to %ds", want)
-	} else if after > 0 {
-		log.Printf("generate_video: duration chip now %ds (want %ds; hook still forces)", after, want)
+		return nil
 	}
-	return nil
+	if after > 0 {
+		return fmt.Errorf("duration control still %ds after selecting %ds; refusing to submit", after, want)
+	}
+	return fmt.Errorf("could not verify duration control after selecting %ds; refusing to submit", want)
 }
 
 func readCurrentVideoDuration(ctx context.Context) (int, error) {
@@ -1695,6 +1692,45 @@ func selectVideoDurationOnce(ctx context.Context, wantSec int) error {
 		return err
 	}
 
+	// The current Doubao UI exposes duration as a 4–15 second slider. Focus the
+	// slider, reset it to the minimum with Home, then advance one second per key.
+	// Keyboard input lands exactly on a tick and is less brittle than pixel math.
+	var slider clickPoint
+	const jsSlider = videoToolbarJSShared + `(() => {
+		const candidates = [];
+		for (const el of document.querySelectorAll('input[type="range"], [role="slider"]')) {
+			if (!isVisible(el)) continue;
+			const r = el.getBoundingClientRect();
+			if (r.width < 8 || r.height < 8) continue;
+			const min = Number(el.min || el.getAttribute('aria-valuemin') || 4);
+			const max = Number(el.max || el.getAttribute('aria-valuemax') || 15);
+			if (!(min <= 4 && max >= 15)) continue;
+			const parentText = (el.parentElement?.parentElement?.innerText || '').replace(/\s+/g, ' ');
+			let score = /时长/.test(parentText) ? 0 : 2;
+			if (/4s/.test(parentText) && /15s/.test(parentText)) score -= 1;
+			candidates.push({ found: true, score, x: r.left + r.width / 2, y: r.top + r.height / 2, text: 'duration slider' });
+		}
+		if (!candidates.length) return { found: false };
+		candidates.sort((a, b) => a.score - b.score);
+		return candidates[0];
+	})()`
+	if err := evalReturnByValue(ctx, jsSlider, &slider); err != nil {
+		return err
+	}
+	if slider.Found {
+		actions := []chromedp.Action{
+			chromedp.MouseClickXY(slider.X, slider.Y, chromedp.ButtonLeft),
+			chromedp.KeyEvent(kb.Home),
+		}
+		for sec := MinVideoDurationSec; sec < want; sec++ {
+			actions = append(actions, chromedp.KeyEvent(kb.ArrowRight))
+		}
+		actions = append(actions, chromedp.Sleep(350*time.Millisecond), chromedp.KeyEvent("\u001b"), chromedp.Sleep(350*time.Millisecond))
+		log.Printf("generate_video: set duration slider to %ds", want)
+		return chromedp.Run(ctx, actions...)
+	}
+
+	// Backward compatibility for older Doubao layouts that use menu options.
 	var opt clickPoint
 	jsOpt := videoToolbarJSShared + fmt.Sprintf(`(() => {
 		const want = %d;
