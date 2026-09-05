@@ -3303,12 +3303,16 @@ func waitForNewChatReady(ctx context.Context, timeout time.Duration, labels ...s
 			// alone is not a readiness signal. Wait for the actual new-chat landing
 			// content before switching skills or attaching reference files.
 			const landingReady = /有什么我能帮你的|有什么可以帮你|我能帮你做什么|为你推荐|How can I help|What can I help/i.test(bodyText);
-			const ready = hasEditor && landingReady && (skillBtn || placeholderOK);
+			// Doubao's newer empty-chat layout intentionally leaves the centre blank.
+			// Its mounted bottom skill toolbar is a stronger readiness signal than
+			// landing copy, which may no longer be rendered at all.
+			const toolbarReady = skillBtn || /模型\s*Seedance|自动\s*[·・]?\s*\d+\s*s/i.test(bodyText);
+			const ready = hasEditor && placeholderOK && (landingReady || toolbarReady);
 			return {
 				ready,
 				hasEditor,
 				landingReady,
-				hint: ready ? (ph.slice(0, 40) || "landing") : (hasEditor ? "blank_shell" : "waiting_editor"),
+				hint: ready ? (toolbarReady ? "toolbar" : (ph.slice(0, 40) || "landing")) : (hasEditor ? "blank_shell" : "waiting_editor"),
 				url: location.href,
 				convId: "",
 			};
@@ -4501,7 +4505,7 @@ func (b *Browser) GenerateVideoViaUI(ctx context.Context, opts VideoUIOptions) (
 	hasAudio := opts.RefAudioKey != "" || len(opts.RefAudioData) > 0
 	durationSec := normalizeVideoDurationSec(int(opts.Duration))
 	if opts.Duration > 0 && int(opts.Duration) != durationSec {
-		log.Printf("generate_video: duration %d remapped to %ds (allowed: 5/10/15)", opts.Duration, durationSec)
+		log.Printf("generate_video: duration %d clamped to %ds (allowed: 4-15)", opts.Duration, durationSec)
 	}
 	var uiPrompt string
 	if officeMode {
@@ -4547,7 +4551,7 @@ func (b *Browser) GenerateVideoViaUI(ctx context.Context, opts VideoUIOptions) (
 			return nil, err
 		}
 		if err := ensureVideoDuration(runCtx, durationSec); err != nil {
-			log.Printf("generate_video: ensure duration %ds: %v", durationSec, err)
+			return nil, fmt.Errorf("ensure duration %ds: %w", durationSec, err)
 		}
 	}
 
