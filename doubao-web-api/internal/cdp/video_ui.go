@@ -66,25 +66,21 @@ func normalizeVideoDurationSec(sec int) int {
 	if sec <= 0 {
 		return DefaultVideoDurationSec
 	}
-	best, bestDiff := allowedVideoDurationsSec[0], absInt(sec-allowedVideoDurationsSec[0])
-	for _, d := range allowedVideoDurationsSec[1:] {
-		if diff := absInt(sec - d); diff < bestDiff {
-			best, bestDiff = d, diff
+	// Generate enough source material for exact local trimming. Mapping 7s to
+	// the nearest 5s can never produce a 7s final video; use the next supported
+	// Seedance duration instead.
+	for _, d := range allowedVideoDurationsSec {
+		if sec <= d {
+			return d
 		}
 	}
-	return best
+	return allowedVideoDurationsSec[len(allowedVideoDurationsSec)-1]
 }
 
-// NormalizeVideoDurationSec maps API duration to Doubao-supported 5 / 10 / 15 seconds.
+// NormalizeVideoDurationSec rounds API duration up to a Doubao-supported
+// 5 / 10 / 15 second source duration so callers can trim to the exact request.
 func NormalizeVideoDurationSec(sec int) int {
 	return normalizeVideoDurationSec(sec)
-}
-
-func absInt(n int) int {
-	if n < 0 {
-		return -n
-	}
-	return n
 }
 
 func videoPromptPrefix(durationSec int) string {

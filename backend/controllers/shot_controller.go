@@ -541,7 +541,8 @@ func (sc *ShotController) finalizeShotVideo(
 		data []byte
 		err  error
 	)
-	if srcKey, ok := sc.tryCOSSourceKey(remoteURL); ok {
+	trimExact := services.IsDoubaoWebAPI(ctx.Provider) && needsExactDoubaoTrim(ctx.Input.Duration)
+	if srcKey, ok := sc.tryCOSSourceKey(remoteURL); ok && !trimExact {
 		adoptStart := time.Now()
 		var adoptErr error
 		path, adoptErr = sc.Storage.SaveVideoFromCOSKey(project.ID, shot.ID, srcKey, "mp4")
@@ -563,6 +564,17 @@ func (sc *ShotController) finalizeShotVideo(
 			return shot, models.Resource{}, err
 		}
 		log.Printf("shot %d: download video %d bytes in %s", shot.ID, len(data), time.Since(dlStart).Round(time.Millisecond))
+		if trimExact {
+			trimStart := time.Now()
+			data, err = trimVideoBytes(data, ctx.Input.Duration)
+			if err != nil {
+				shot.Status = "error"
+				shot.ErrorMessage = fmt.Sprintf("将豆包视频裁剪为 %d 秒失败：%v", ctx.Input.Duration, err)
+				_ = sc.DB.Save(&shot).Error
+				return shot, models.Resource{}, err
+			}
+			log.Printf("shot %d: trimmed Doubao source to %ds in %s", shot.ID, ctx.Input.Duration, time.Since(trimStart).Round(time.Millisecond))
+		}
 
 		saveStart := time.Now()
 		path, err = sc.Storage.SaveVideo(project.ID, shot.ID, data, "mp4")
