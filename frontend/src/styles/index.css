@@ -1489,6 +1489,10 @@ aside,
   background: #ff785a !important;
 }
 
+.resource-actions .resource-generate-btn {
+  flex: 1 1 100%;
+}
+
 .resource-actions .resource-regen-btn:hover,
 .resource-actions .resource-regen-btn:focus {
   border-color: #ff8f75 !important;

@@ -211,6 +211,17 @@ function panoramaSplitDone(r: Resource): boolean {
 }
 
 const expandedPromptIds = ref<number[]>([])
+const generatingResourceId = ref(0)
+
+async function generateResourceImage(item: Resource) {
+  if (!isSelectableAsset(item) || item.imageUrl || batchResourceBusy.value) return
+  generatingResourceId.value = item.id
+  try {
+    await batchGenerateImages([item.id])
+  } finally {
+    generatingResourceId.value = 0
+  }
+}
 
 function drawingPrompt(item: Resource) {
   return (item.genPrompt || '').trim()
@@ -1335,6 +1346,17 @@ async function runAiGenerate() {
               </div>
             </div>
             <div class="resource-actions">
+              <el-button
+                v-if="isSelectableAsset(entry.resource) && !entry.resource.imageUrl"
+                type="primary"
+                size="small"
+                class="resource-action-btn resource-generate-btn"
+                :loading="generatingResourceId === entry.resource.id"
+                :disabled="!!batchResourceBusy && generatingResourceId !== entry.resource.id"
+                @click="generateResourceImage(entry.resource)"
+              >
+                生成图片
+              </el-button>
               <el-button size="small" class="resource-action-btn" @click="openEditResourceModal(entry.resource)">
                 编辑
               </el-button>
