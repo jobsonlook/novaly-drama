@@ -877,6 +877,7 @@ func (rc *ResourceController) runImageGenerationJob(jobID, projectID uint, resTy
 	case "character":
 		urls, prompt, genErr = rc.Ark.GenerateCharacterCandidates(provider, model, services.CharacterImageInput{
 			Name: strings.TrimSpace(input.Name), Description: strings.TrimSpace(input.Description), Count: count,
+			Style:   strings.TrimSpace(project.Style),
 			Quality: resolution, Aspect: aspect,
 			ReferenceImages: refImages, LockIdentity: lockIdentity, RawPrompt: rawPrompt, OnProgress: onProgress,
 		})

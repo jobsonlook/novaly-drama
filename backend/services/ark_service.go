@@ -1031,6 +1031,7 @@ type ImageGenProgress func(done, total int, message string)
 type CharacterImageInput struct {
 	Name            string
 	Description     string
+	Style           string
 	Count           int
 	Quality         string // low | medium | high
 	Aspect          string // 1:1 | 16:9 | 9:16
@@ -1057,11 +1058,11 @@ func (s *ArkService) GenerateCharacterCandidates(provider models.AIProvider, mod
 	if input.RawPrompt && strings.TrimSpace(input.Description) != "" {
 		prompt = strings.TrimSpace(input.Description)
 	} else if useImg2Img && input.LockIdentity {
-		prompt = buildCharacterIdentityLockPrompt(input.Name, input.Description)
+		prompt = buildCharacterIdentityLockPrompt(input.Name, input.Description, input.Style)
 	} else if useImg2Img {
-		prompt = buildCharacterImg2ImgPrompt(input.Name, input.Description, len(refImages))
+		prompt = buildCharacterImg2ImgPrompt(input.Name, input.Description, len(refImages), input.Style)
 	} else {
-		prompt = buildCharacterPrompt(input.Name, input.Description)
+		prompt = buildCharacterPrompt(input.Name, input.Description, input.Style)
 	}
 	prompt = withNoLogo(prompt)
 	urls, err := s.generateImageCandidates(provider, model, prompt, refImages, count, 1000, input.OnProgress, ImageGenSpec{
@@ -1385,17 +1386,20 @@ func buildScenePrompt(description, style string) string {
 	return strings.Join(parts, "\n")
 }
 
-func buildCharacterIdentityLockPrompt(name, overlay string) string {
+func buildCharacterIdentityLockPrompt(name, overlay, style string) string {
 	overlay = strings.TrimSpace(overlay)
 	if overlay == "" {
 		overlay = "只改变服装/妆造/状态，其余与底模一致"
 	}
+	overlay, render := characterRenderDirection(overlay, style)
 	return fmt.Sprintf(`图1是角色「%s」的底模定妆照。必须锁定同一人：五官、脸型、年龄、肤色、体型、头身比与图1完全一致。禁止换脸、禁止重画五官、禁止另起一个角色。不要复制图1的画幅比例。
 
 只叠加状态差异（换装/妆造/战损/变身），不要改身份：
 %s
 
-输出必须是 16:9 横构图角色设定四视图（不是竖图）：左侧面部特写，右侧从左到右正面+侧面+背面全身。纯白背景，摄影棚均匀柔光，无文字无水印。`, name, overlay)
+输出必须是 16:9 横构图角色设定四视图（不是竖图）：左侧面部特写，右侧从左到右正面+侧面+背面全身。纯白背景，均匀柔光，无文字无水印。
+
+画面质感（最高优先级）：%s`, name, overlay, render)
 }
 
 func buildSceneIdentityLockPrompt(description, style string) string {
@@ -1414,7 +1418,7 @@ func buildSceneIdentityLockPrompt(description, style string) string {
 	return strings.Join(parts, "\n")
 }
 
-func buildCharacterImg2ImgPrompt(name, description string, refCount int) string {
+func buildCharacterImg2ImgPrompt(name, description string, refCount int, style string) string {
 	desc := strings.TrimSpace(description)
 	if desc == "" {
 		desc = "保持参考图中角色的面部特征、发型、服装与气质，生成专业角色定妆照"
@@ -1423,7 +1427,8 @@ func buildCharacterImg2ImgPrompt(name, description string, refCount int) string 
 	if refCount > 1 {
 		refHint = fmt.Sprintf("已提供 %d 张参考图，请融合角色外貌与服装特征", refCount)
 	}
-	return fmt.Sprintf(`%s，生成专业影视角色设定参考图（Character Reference Sheet），16:9 横构图，纯白背景，摄影棚均匀柔光，无文字无水印。
+	desc, render := characterRenderDirection(desc, style)
+	return fmt.Sprintf(`%s，生成专业角色设定参考图（Character Reference Sheet），16:9 横构图，纯白背景，均匀柔光，无文字无水印。
 
 画面布局（严格遵循）：
 - 左侧：角色「%s」面部高清特写肖像，可见肩颈，中性沉稳表情
@@ -1431,7 +1436,7 @@ func buildCharacterImg2ImgPrompt(name, description string, refCount int) string 
 
 角色要求：%s
 
-画面质感：超写实真人摄影棚拍摄，8K超高清，肤质与布料纹理真实，不是二次元插画，不是CG游戏立绘`, refHint, name, desc)
+画面质感（最高优先级）：%s`, refHint, name, desc, render)
 }
 
 func buildPropImg2ImgPrompt(name, description string, refCount int) string {
@@ -1451,8 +1456,9 @@ func buildPropImg2ImgPrompt(name, description string, refCount int) string {
 画面要求：16:9 横构图，超写实产品摄影质感，材质纹理清晰，适合作为 AI 视频分镜的道具参考图；8K 超高细节`, refHint, name, desc)
 }
 
-func buildCharacterPrompt(name, description string) string {
-	return fmt.Sprintf(`专业影视角色设定参考图（Character Reference Sheet / Turnaround），16:9 横构图，纯白背景，摄影棚均匀柔光，无阴影干扰，无文字无水印。
+func buildCharacterPrompt(name, description, style string) string {
+	description, render := characterRenderDirection(description, style)
+	return fmt.Sprintf(`专业角色设定参考图（Character Reference Sheet / Turnaround），16:9 横构图，纯白背景，均匀柔光，无阴影干扰，无文字无水印。
 
 画面布局（严格遵循）：
 - 左侧：角色「%s」面部高清特写肖像，可见肩颈，中性沉稳表情
@@ -1460,7 +1466,22 @@ func buildCharacterPrompt(name, description string) string {
 
 角色外貌与服装：%s
 
-画面质感：超写实真人摄影棚拍摄，8K超高清，肤质与布料纹理真实，自然淡妆，光线柔和均匀，不是二次元，不是插画，不是CG，不是3D渲染，不是游戏角色立绘`, name, description)
+画面质感（最高优先级）：%s`, name, description, render)
+}
+
+var photorealCharacterLineRe = regexp.MustCompile(`(?m)^画面质感：超写实真人摄影棚拍摄[^\n]*\n?`)
+
+func characterRenderDirection(description, style string) (string, string) {
+	description = strings.TrimSpace(photorealCharacterLineRe.ReplaceAllString(description, ""))
+	style = strings.TrimSpace(style)
+	combined := strings.ToLower(style + "\n" + description)
+	if strings.Contains(combined, "3d") || strings.Contains(combined, "pbr") || strings.Contains(combined, "三维动画") {
+		if style == "" {
+			style = "国风3D动漫，高精度建模与PBR材质，电影级体积光与东方美学"
+		}
+		return description, style + "。明确采用风格化3D动漫角色渲染，保持写实比例与清晰五官；禁止真人照片、真人实拍、真人摄影棚定妆照，禁止二维平涂和二次元大眼贴纸感。"
+	}
+	return description, "超写实真人摄影棚拍摄，8K超高清，肤质与布料纹理真实，自然淡妆，光线柔和均匀；禁止二次元插画和CG游戏立绘。"
 }
 
 func (s *ArkService) generateImage(provider models.AIProvider, model models.AIModel, prompt string, seed int, spec ImageGenSpec) (string, error) {
