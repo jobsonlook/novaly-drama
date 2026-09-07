@@ -320,12 +320,19 @@
   {{if .Workers}}
   <div class="banner" style="background:#f8fafc">
     <strong>实际运行中的 Chrome Worker</strong>
+    <p class="muted" style="margin:6px 0 0">只有“可调度”的 Worker 能接收新任务；浏览器窗口空闲但额度为 0 时，任务会等待其他有额度的 Worker。</p>
     <div class="worker-list">
       {{range .Workers}}
       <span class="worker-card">
         <code>:{{.CDPPort}}</code>
         <strong>{{if .Name}}{{.Name}}{{else}}未绑定账号{{end}}</strong>
-        {{if .Busy}}<span class="badge active">生成中</span>{{else}}<span class="badge">空闲</span>{{end}}
+        {{if .Busy}}
+          <span class="badge active">生成中</span>
+        {{else if eq .Remaining 0}}
+          <span class="badge" style="background:#fee2e2;color:#b91c1c">额度已用完 · 不可调度</span>
+        {{else}}
+          <span class="badge" style="background:#dcfce7;color:#166534">空闲 · 可调度</span>
+        {{end}}
         {{if ge .Remaining 0}}<span class="muted">剩余 {{.Remaining}}</span>{{end}}
       </span>
       {{end}}
