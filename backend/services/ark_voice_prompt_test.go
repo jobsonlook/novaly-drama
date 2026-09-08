@@ -45,6 +45,44 @@ func TestBuildVideoPromptIncludesVoices(t *testing.T) {
 	}
 }
 
+func TestBuildVideoPromptContinuesFromPreviousTailFrame(t *testing.T) {
+	got := BuildVideoPrompt(VideoInput{
+		Script: "【0-7秒】人物接着抬手向前走。",
+		Refs: []VideoRef{
+			{
+				Resource: models.Resource{ID: 1, Type: "character", Name: "唐小满", StylizedImagePath: "character.jpg"},
+				Kind:     "character", Label: "唐小满",
+			},
+			{
+				Resource: models.Resource{ID: 2, Type: "scene", Name: "上一镜尾帧 · 分镜01", GenType: "transition_frame", ImagePath: "tail.jpg"},
+				Kind:     "scene", Variant: "original", Label: "上一镜尾帧",
+			},
+		},
+		Duration: 7,
+		Ratio:    "9:16",
+	})
+	for _, part := range []string{
+		"将图2定义为上一镜真实尾帧",
+		"【承接上一镜尾帧·最高优先级】图2是上一镜结束时的真实尾帧",
+		"本镜必须从图2继续",
+		"首帧承接其构图",
+		"随后只按当前分镜文案推进",
+	} {
+		if !strings.Contains(got, part) {
+			t.Fatalf("transition prompt missing %q:\n%s", part, got)
+		}
+	}
+	if strings.Count(got, "【承接上一镜尾帧·最高优先级】") != 2 {
+		t.Fatalf("continuity constraint should be repeated twice:\n%s", got)
+	}
+	if strings.Contains(got, "将图2定义为<场景") {
+		t.Fatalf("transition frame must not be described as an ordinary scene:\n%s", got)
+	}
+	if strings.Contains(got, SceneNoTextConstraint) {
+		t.Fatalf("transition-only scene ref must not receive empty-scene constraint:\n%s", got)
+	}
+}
+
 func TestBuildVideoPromptWithoutDialogueBansInventedSpeech(t *testing.T) {
 	got := BuildVideoPrompt(VideoInput{
 		Script: "【0-5秒】镜头：过肩斜角，姚三刀下巴点向韩铮方向；音效：低沉鼓点\n【5-10秒】镜头：近景反打韩铮，韩铮垂头躬身；音效：低沉鼓点",

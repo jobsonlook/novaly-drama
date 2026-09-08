@@ -726,6 +726,8 @@ func buildVideoRefLegend(refs []refImage) string {
 			continue
 		}
 		switch {
+		case isTransitionRefImage(r):
+			parts = append(parts, fmt.Sprintf("将图%d定义为上一镜真实尾帧（%s；本镜连续性起点，不是空镜场景图）", r.Index, label))
 		case isPositioningRefImage(r):
 			parts = append(parts, fmt.Sprintf("将图%d定义为站位示意图（%s）", r.Index, label))
 		case r.Kind == "character":
@@ -763,6 +765,9 @@ func buildVideoRefLegend(refs []refImage) string {
 	sceneNCount := 0
 	hasPos := false
 	for _, r := range refs {
+		if isTransitionRefImage(r) {
+			continue
+		}
 		if isPositioningRefImage(r) {
 			hasPos = true
 			continue
@@ -782,6 +787,26 @@ func buildVideoRefLegend(refs []refImage) string {
 		out += "场景参考图是空镜底板，不要从图中抄人。"
 	}
 	return out
+}
+
+func isTransitionRefImage(r refImage) bool {
+	return strings.EqualFold(strings.TrimSpace(r.GenType), "transition_frame") ||
+		strings.Contains(r.Name, "上一镜尾帧") || strings.Contains(r.Label, "上一镜尾帧")
+}
+
+func isTransitionVideoRef(r VideoRef) bool {
+	return strings.EqualFold(strings.TrimSpace(r.Resource.GenType), "transition_frame") ||
+		strings.Contains(r.Resource.Name, "上一镜尾帧") || strings.Contains(r.Label, "上一镜尾帧")
+}
+
+func buildTransitionContinuityConstraint(refs []refImage) string {
+	for _, r := range refs {
+		if !isTransitionRefImage(r) {
+			continue
+		}
+		return fmt.Sprintf("【承接上一镜尾帧·最高优先级】图%d是上一镜结束时的真实尾帧，不是空镜、风格图或普通场景参考。本镜必须从图%d继续：首帧承接其构图、景别、摄影机方位、人物数量、人物左右前后站位、身体姿态、朝向、视线、持物、服装、光线和场面状态，保持时空连续、动作连续，禁止无故跳切、换位、换景或重置动作；随后只按当前分镜文案推进。尾帧若有脸部马赛克或标记，只把它当遮挡标注，人物五官以角色参考图为准，成片不要保留马赛克或标记。", r.Index, r.Index)
+	}
+	return ""
 }
 
 func isPositioningRefImage(r refImage) bool {
@@ -869,7 +894,7 @@ const VideoPositioningAnnotationConstraint = "重要：参考图上若有遮挡�
 
 func hasSceneVideoRef(input VideoInput) bool {
 	for _, r := range input.Refs {
-		if r.Kind == "scene" && !isPositioningVideoRef(r) {
+		if r.Kind == "scene" && !isPositioningVideoRef(r) && !isTransitionVideoRef(r) {
 			return true
 		}
 	}
@@ -890,13 +915,6 @@ func hasPositioningVideoRef(input VideoInput) bool {
 		if isPositioningVideoRef(r) {
 			return true
 		}
-		gen := strings.TrimSpace(r.Resource.GenType)
-		if strings.EqualFold(gen, "transition_frame") {
-			return true
-		}
-		if strings.Contains(r.Resource.Name, "尾帧") || strings.Contains(r.Label, "尾帧") {
-			return true
-		}
 	}
 	return false
 }
@@ -910,6 +928,10 @@ func BuildVideoPrompt(input VideoInput) string {
 		parts = append(parts, legend)
 	} else if imageRefs := strings.TrimSpace(input.ImageRefs); imageRefs != "" {
 		parts = append(parts, imageRefs)
+	}
+	transitionContinuity := buildTransitionContinuityConstraint(refs)
+	if transitionContinuity != "" {
+		parts = append(parts, transitionContinuity)
 	}
 	parts = append(parts, VideoNoSubtitleConstraint)
 	hasSpeech := false
@@ -976,6 +998,11 @@ func BuildVideoPrompt(input VideoInput) string {
 		ratio = "16:9"
 	}
 	parts = append(parts, "视频比例为"+ratio)
+	// Repeat continuity near the tail because long Seedance prompts weigh later
+	// instructions strongly and may otherwise treat the transition as style-only.
+	if transitionContinuity != "" {
+		parts = append(parts, transitionContinuity)
+	}
 	// Repeat the applicable audio rule at the tail because long multi-reference
 	// prompts tend to weight their final instructions more heavily. Previously
 	// only silent shots repeated their rule here, so dialogue instructions could
