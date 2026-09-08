@@ -3127,6 +3127,13 @@ export function useNovaly() {
         notifyStudioSync({ type: 'shot', projectId: active.value?.id, shotId: shot.id, status: 'settled' })
       }
       if (active.value) await refreshProjectResources()
+      ElNotification({
+        title: '已承接上一镜尾帧',
+        message: data.message || '已自动截取紧邻上一镜的最后一帧，并设为当前分镜第 1 张参考图',
+        type: 'success',
+        position: 'bottom-right',
+        duration: 5000,
+      })
       // 后台人脸标注完成后会覆盖同一张图；定时刷新几次拿到标注版（URL 带版本号）
       if (data.annotating) {
         const shotId = shot.id

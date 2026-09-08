@@ -17,7 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// PreviousFrame extracts the last frame of the most recent finished shot video
+// PreviousFrame extracts the last frame of the immediately preceding shot video
 // and adds it to the current shot as a transition reference image.
 // The frame resource keeps the same visual style as the current shot's positioning
 // reference (站位图), so characters/clothing stay consistent.
@@ -34,21 +34,22 @@ func (sc *ShotController) PreviousFrame(c *gin.Context) {
 	}
 	projectID := episode.ProjectID
 
-	// Find the most recent finished shot in this episode that has a video.
+	// Continuity must come from the immediately preceding shot. Do not silently
+	// skip an unfinished/missing shot and borrow a frame from an older scene.
 	var prev models.Shot
 	err := sc.DB.Where(
-		"episode_id = ? AND status = ? AND id != ? AND (sort_order < ? OR (sort_order = ? AND id < ?))",
-		shot.EpisodeID, "done", shot.ID, shot.SortOrder, shot.SortOrder, shot.ID,
+		"episode_id = ? AND id != ? AND (sort_order < ? OR (sort_order = ? AND id < ?))",
+		shot.EpisodeID, shot.ID, shot.SortOrder, shot.SortOrder, shot.ID,
 	).Order("sort_order DESC, id DESC").First(&prev).Error
 	if err != nil {
-		fail(c, 404, "当前分镜之前没有已生成的分镜视频")
+		fail(c, 404, "当前分镜是本集第一镜，没有可承接的上一镜")
 		return
 	}
 
 	// Read the previous video bytes (local or COS).
 	videoBytes, ext, err := sc.Storage.ReadShotVideo(projectID, prev.ID)
 	if err != nil || len(videoBytes) == 0 {
-		fail(c, 404, "未找到上一镜视频文件")
+		fail(c, 404, fmt.Sprintf("紧邻上一镜「%s」还没有视频，请先生成或上传上一镜视频", prev.Label))
 		return
 	}
 

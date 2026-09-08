@@ -611,11 +611,12 @@ function statusTagType(shot: Shot): 'success' | 'warning' | 'danger' | 'info' {
               <el-button
                 size="small"
                 text
+                title="自动截取紧邻上一镜视频的最后一帧，并设为当前分镜第 1 张参考图"
                 :loading="extractingFrame === shot.id"
                 :disabled="generating === shot.id || extractingFrame === shot.id"
                 @click="extractPreviousFrame(shot)"
               >
-                上一镜尾帧
+                {{ extractingFrame === shot.id ? '截取尾帧中…' : '承接上一镜尾帧' }}
               </el-button>
               <label class="shot-upload-chip" :class="{ disabled: uploadingShot === shot.id || generating === shot.id }">
                 <span>{{ uploadingShot === shot.id ? '上传中…' : (shot.videoUrl ? '替换视频' : '上传视频') }}</span>
