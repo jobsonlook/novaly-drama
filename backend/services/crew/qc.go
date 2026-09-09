@@ -42,8 +42,8 @@ func ReviewQualityAgainst(ark *services.ArkService, provider models.AIProvider, 
 ` + scope + `
 红线（命中即为 high）：
 R1 资产引用合法：文案里能认出来的焦点角色/场景/道具，若资产名单已有，必须出现在该镜 refs。文案点名的具名角色都应挂参考图，不因人数裁掉。群演/杀手甲乙用站位图，不要求每人一张角色图。同一父角色禁止日常图和换装衍生同镜。有场景资产时每镜都要绑场景图。文案地点必须对上绑定的场景图（更衣室文案不要绑会所包厢）。资产名单没有的角色不要当问题（缺资产不审核、不建议新增）。
-R2 台词忠实与时长：分镜「」内台词须对照剧本原句与说话人；允许删旁白，不允许改人物说过的话、不改派说话人、不新增剧本没有的情节。例：剧本韩铮说「舌头？你也穿越了？」绝不能写成姚三刀说。同一句「」禁止出现在两镜。按 4 字/秒计时（不计标点），3 秒拍大约 12 字；单拍超过 20 字必须拆到下一拍并换景别。空「」、未写说话人（应写成 阿彪说：「……」）也是 R2。口播「X说：」那一拍镜头必须让 X 进画并开口，禁止台词是 A、画面只写 B 盯 C（会导致视频模型对错口型）；内心独白除外。超时说不完会导致视频模型整句不念。
-R3 上下文因果、人物目标与连续性：每句台词、每个动作须承接前一拍的信息，并服务于人物当下可辨认的目标（如试探、逼问、说服、隐瞒、拒绝、确认、争取、保护），其结果还应给下一拍留下回应点。只有「开口、听者反应、停顿、看向对方、陷入沉思」而无法判断人物想得到什么，或动作与前后文无因果关系，均报 R3；建议须指出应承接的具体信息和应呈现的目标，不得编造新剧情。相邻镜时空/道具也不得无过渡突变。服装动作单向可接：赤膊→接衬衫/扣扣子可以；已经穿衣/扣扣子后不能退回赤膊或改成脱衣服。
+R2 台词忠实与时长：分镜「」内台词须对照剧本原句与说话人；允许删旁白，不允许改人物说过的话、不改派说话人、不新增剧本没有的情节。例：剧本韩铮说「舌头？你也穿越了？」绝不能写成姚三刀说。同一句「」禁止在两镜复读。同一角色的一次完整发言优先留在同一条10秒分镜，单拍装不下先延续到本镜下一拍并换景别；普通对白整镜建议40–45字、上限50字，快速对白极限55字。分类语速：普通4.5–5字/秒，快速5–6，萌宝4–4.5，威胁/揭晓3.5–4.5，喘息/哭腔3–4。自动硬检按最快6字/秒：3秒18字、4秒24字。空「」、未写说话人也是R2。口播那一拍必须让说话人进画并开口；内心独白除外。
+R3 上下文因果、人物目标、表演与连续性：每句台词、动作和表情须承接前一拍的信息，并服务于人物当下目标。对白近景/中近景/特写中的说话人不能只有「开口」，应从剧情刺激推导 1～2 个可见信号（眉眼、视线闪避、嘴角、下颌、吞咽、呼吸等）；一句发言跨多拍时应有合理的表情阶段变化。只有「皱眉/冷笑/震惊」标签、连续拍复制同一表情、所有角色套用同一表情模板，均报R3。远景、背影、纯物件和高速动作不强制面部表情，可用肩颈、手部力度与呼吸。建议须指出应承接的具体刺激、人物要掩饰或争取什么，不得编造新剧情。相邻镜时空、表情状态和道具不得无过渡突变。
 R4 父子外观匹配：衍生态（赤膊/战损/夜景）须绑衍生图；穿衣/扣衬衫须绑日常父角色。同一角色日常图与换装图的脖子配饰必须一致（奖牌/项链不能一张有一张没有）。
 R5 配乐要衔接：音效必须带配乐床（鼓点/弦乐垫等），后期不加。整集同一曲风/节奏型，相邻镜不要换乐器。允许随情绪改强弱（低鼓点→紧张鼓点）。不要建议删配乐。
 R6 外观交给参考图：不要写「身着蓝衬衫、高束发」这种固有造型；只写动作/表情/当下状态（汗湿、青筋、接过衬衫）。
@@ -817,6 +817,8 @@ func detectAudioBeatAndLookIssues(shots []ShotContext) []QCIssue {
 	out := make([]QCIssue, 0)
 	for i, shot := range shots {
 		idx := shotIndexOf(shot, i)
+		shotSpeechTotal := 0
+		speakerTotals := map[string]int{}
 		if appearanceRE.MatchString(shot.Script) || wearingLookRE.MatchString(shot.Script) {
 			out = append(out, QCIssue{
 				Severity:   "high",
@@ -858,6 +860,11 @@ func detectAudioBeatAndLookIssues(shots []ShotContext) []QCIssue {
 					continue
 				}
 				nonEmpty++
+				n := speechRunes(text)
+				shotSpeechTotal += n
+				if speaker := spokenSpeakerName(beat); speaker != "" {
+					speakerTotals[speaker] += n
+				}
 				if !quoteHasSpeaker(beat, m[0]) {
 					out = append(out, QCIssue{
 						Severity:   "medium",
@@ -871,7 +878,6 @@ func detectAudioBeatAndLookIssues(shots []ShotContext) []QCIssue {
 				if secs <= 0 {
 					continue
 				}
-				n := speechRunes(text)
 				maxN := maxSpeechRunes(secs)
 				if n > maxN {
 					out = append(out, QCIssue{
@@ -879,8 +885,8 @@ func detectAudioBeatAndLookIssues(shots []ShotContext) []QCIssue {
 						Code:       "R2",
 						ShotID:     shot.ID,
 						ShotIndex:  idx,
-						Message:    fmt.Sprintf("这段约 %.0f 秒，台词 %d 字，按 4 字/秒会说不完（上限 %d 字）", secs, n, maxN),
-						Suggestion: "按语义停顿拆到下一拍或下一镜并换景别；禁止精简原文。超时模型常整句不念。",
+						Message:    fmt.Sprintf("这段约 %.0f 秒，台词 %d 字，超过最快语速硬上限 %d 字", secs, n, maxN),
+						Suggestion: "按自然语义停顿先拆到本镜下一拍并换景别；整镜装不下才跨镜，禁止精简原文。",
 					})
 				}
 			}
@@ -894,6 +900,18 @@ func detectAudioBeatAndLookIssues(shots []ShotContext) []QCIssue {
 					Suggestion: "拆成两拍，每句写成 角色说：「……」。",
 				})
 			}
+		}
+		for speaker, n := range speakerTotals {
+			if n > 55 {
+				out = append(out, QCIssue{Severity: "high", Code: "R2", ShotID: shot.ID, ShotIndex: idx,
+					Message:    fmt.Sprintf("%s整镜对白%d字，超过10秒单角色绝对上限55字", speaker, n),
+					Suggestion: "在自然语义边界拆到下一镜，并为新镜安排新的视觉重点；禁止机械换景别。"})
+			}
+		}
+		if shotSpeechTotal > 60 {
+			out = append(out, QCIssue{Severity: "high", Code: "R2", ShotID: shot.ID, ShotIndex: idx,
+				Message:    fmt.Sprintf("整镜全部对白%d字，超过10秒最快语速绝对上限60字", shotSpeechTotal),
+				Suggestion: "按说话轮次与自然语义边界拆镜，保留完整台词和说话人。"})
 		}
 	}
 	return out

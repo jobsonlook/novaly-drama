@@ -250,7 +250,7 @@ func RewriteShotsForQC(ark *services.ArkService, provider models.AIProvider, mod
 不要新增镜头。不要改参考图/refs。不要顺手修没点名的问题。
 规则：
 - 「」内台词必须对照剧本草稿，说话人不能换。一句拆在两拍/两镜时，后半句仍归原说话人，不要改派给旁边的人。
-- 台词按时长拆，不按时长删：3秒拍大约12个汉字，单拍超过20字必须切开换景别。禁止为了塞进3秒而精简原文。
+- 台词按分类语速拆，不按时长删：同一角色完整发言优先留在同一条10秒分镜；单拍装不下先延续到本镜下一拍并换景别。普通对白整镜上限50字，快速对白极限55字；整镜装不下才跨镜。禁止为了塞进3秒而精简原文。
 - 每句写成 阿彪说：「……」。无台词删掉空「」。
 - 允许删旁白，不允许改人物说过的话、不编造情节、不把动作说明写进「」里。
 - 音效 = 配乐床 + 环境音 + 动作声。配乐要写，不要删。相邻镜沿用同一曲风，只改强弱。
@@ -260,6 +260,7 @@ func RewriteShotsForQC(ark *services.ArkService, provider models.AIProvider, mod
 - 单人和多人镜都补九格站位+朝向：每个【秒】行里人物首次出现时写 人名(左前)3/4正面朝右；同场没写走位/转身就沿用原格子和朝向。只有空镜、纯物件、纯手部或脸部极特写可省略，人物极特写须写「承接上一拍人物位置不变」。有站位参考图时按图写格子。
 - 一镜具名角色不超过 5 人；点名的人都应能挂参考图。同屏超过 5 人按时间拆到下一镜，群演走站位图。
 - 每句台词、每个动作都要承接前一拍的信息并服务于人物的当下目标，再给下一拍留下回应点。用动作、表情、视线和说话方式呈现试探/逼问/说服/隐瞒/拒绝/确认等意图，不要写「目标：」。动作、视线和反应对象必须写具体角色姓名，禁止“听者、对方、对面的人、另一人、其眼神/态度”；不得用停顿、陷入沉思凑时长或为补目标另编剧情。
+- 修复人物表演时，先写清本拍刺激，再用眉眼、视线停留/闪避、嘴角、下颌、吞咽、呼吸等 1～2 个可见信号呈现人物在掩饰、试探或反击；一句发言跨多拍须有阶段变化。禁止机械补「皱眉、冷笑、瞳孔骤缩」，远景/背影/纯物件镜不强塞面部表情。
 ` + DialogueCraftRules + `
 
 只输出 JSON：{"shots":[{"id":1,"script":"改后的时序文案"}]}
@@ -1258,6 +1259,7 @@ func splitQuoteForBeat(quote string, secs float64) (keep, rest string) {
 	}
 	runes := []rune(quote)
 	bestCut := -1
+	lastStrongCut := -1
 	for i := 1; i <= len(runes); i++ {
 		prefix := string(runes[:i])
 		if speechRunes(prefix) > maxN {
@@ -1267,7 +1269,16 @@ func splitQuoteForBeat(quote string, secs float64) (keep, rest string) {
 		// pauses. Rejecting boundaries under four characters made the fallback
 		// cut later at raw quota (交给/我), which is much worse.
 		if isClauseBreakRune(runes[i-1]) && speechRunes(prefix) >= 2 {
+			if (runes[i-1] == '—' || runes[i-1] == '–') && lastStrongCut > 0 &&
+				speechRunes(string(runes[lastStrongCut:i])) <= 6 {
+				// Keep a short vocative such as「韩小灶——」with the command
+				// that follows instead of stranding it at the end of this beat.
+				continue
+			}
 			bestCut = i
+			if strings.ContainsRune("。！？；.!?;", runes[i-1]) {
+				lastStrongCut = i
+			}
 		}
 	}
 	if bestCut > 0 && bestCut < len(runes) {

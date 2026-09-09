@@ -55,8 +55,8 @@ func TestStoryboardPipelinePreservesMixedNewlineLongDialogue(t *testing.T) {
 func TestStoryboardPipelineDoesNotSplitYaosReliableLineAtVerbObject(t *testing.T) {
 	source := `**姚三刀**（路过，阴阳）："裴师傅，生辰宴主菜交给我靠谱人。韩小灶——去择菜叶，别脏了贵人的眼。"`
 	first, tail := splitQuoteForBeat("裴师傅，生辰宴主菜交给我靠谱人。韩小灶——去择菜叶，别脏了贵人的眼。", 3)
-	if first != "裴师傅，" || !strings.HasPrefix(tail, "生辰宴") {
-		t.Fatalf("3-second split must use the first punctuation, got %q / %q", first, tail)
+	if first != "裴师傅，生辰宴主菜交给我靠谱人。" || !strings.HasPrefix(tail, "韩小灶") {
+		t.Fatalf("3-second fastest-budget split must keep the longest safe clause, got %q / %q", first, tail)
 	}
 	model := StoryboardResult{Shots: []StoryboardShot{{
 		Label: "姚三刀发话", Duration: 10, SceneName: "御膳房大灶间", CharacterNames: []string{"姚三刀", "裴长河"},

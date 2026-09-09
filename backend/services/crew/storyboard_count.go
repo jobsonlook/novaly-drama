@@ -10,7 +10,7 @@ import (
 const (
 	StoryboardPaceFine   = "fine"
 	StoryboardPacePacked = "packed"
-	finePackSeconds      = 3.5
+	finePackSeconds      = 10.0
 	packedPackSeconds    = 10.0
 )
 
@@ -41,7 +41,8 @@ func EstimateStoryboardCount(script string) int {
 }
 
 // EstimateStoryboardCountForPace is a deterministic target:
-// fine ≈ one shot per spoken line / action beat (~3.5s of story);
+// fine ≈ one shot per complete spoken turn / action beat, with a complete
+// utterance staying inside one 10s shot whenever its dialogue capacity allows;
 // packed ≈ one 10s shot per ~10s of dialogue+action.
 func EstimateStoryboardCountForPace(script, pace string) int {
 	script = strings.TrimSpace(script)
@@ -176,7 +177,7 @@ func dialogueRunes(script string) int {
 	n := 0
 	for _, m := range dialogueRE.FindAllStringSubmatch(script, -1) {
 		if len(m) > 1 {
-			n += len([]rune(m[1]))
+			n += speechRunes(m[1])
 		}
 	}
 	for _, line := range strings.Split(script, "\n") {
@@ -194,7 +195,7 @@ func dialogueRunes(script string) int {
 		if strings.Contains(rest, "「") {
 			continue
 		}
-		n += len([]rune(stripStageDirection(rest)))
+		n += speechRunes(stripStageDirection(rest))
 	}
 	return n
 }

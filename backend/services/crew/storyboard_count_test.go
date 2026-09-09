@@ -58,3 +58,12 @@ func TestEstimateEmptyIsTwo(t *testing.T) {
 		t.Fatal("empty should be 2")
 	}
 }
+
+func TestEstimateFineKeepsOneCompleteTurnInsideTenSeconds(t *testing.T) {
+	script := `**1-1 正殿 [内] [日]**
+**陆铁算盘**：本金明明只有三百灵石，他们却偷偷在契纸夹层添了二千七百，还把宗门的抵押物偷换成了归元祖脉。`
+	n := EstimateStoryboardCountForPace(script, StoryboardPaceFine)
+	if n != 2 { // public estimator keeps a two-shot floor, but must not inflate by 3.5s chunks
+		t.Fatalf("one complete 42-rune turn should stay within one 10s unit (plus floor), got %d", n)
+	}
+}

@@ -173,7 +173,7 @@ func TestDetectUserLockerRoomDialogueOverload(t *testing.T) {
 			"【3-7秒】近景，韩铮拿着衬衫嘴角上扬；音效：低沉鼓点持续。「断财路？那叫市场调控。谁不服，排队，我给你再调控一次。」\n" +
 			"【7-10秒】中景，韩铮展开衬衫准备穿上；音效：低沉鼓点持续。「 」",
 	}})
-	if !hasQCMessage(issues, "会说不完") {
+	if !hasQCMessage(issues, "超过最快语速硬上限") {
 		t.Fatalf("expected overlong dialogue, got %#v", issues)
 	}
 	if !hasQCMessage(issues, "空") {
