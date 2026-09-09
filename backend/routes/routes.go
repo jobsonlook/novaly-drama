@@ -199,6 +199,7 @@ func New(db *gorm.DB, cfg config.Config) *gin.Engine {
 	api.POST("/shots/:id/use-video", shot.UseVideo)
 	api.GET("/shots/:id/download", shot.Download)
 	api.GET("/settings/providers", settings.ListProviders)
+	api.POST("/settings/providers", settings.CreateProvider)
 	api.GET("/settings/providers/:id/api-key", settings.RevealAPIKey)
 	api.PUT("/settings/providers/:id", settings.UpdateProvider)
 	api.POST("/settings/providers/:id/models", settings.AddModel)

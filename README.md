@@ -159,6 +159,14 @@ Worker 状态的意思：
 
 自动写作、剧本拆分、提示词优化等功能需要一个文本模型。Novaly 可以直接适配三种常见接口格式，不需要自己修改代码。
 
+全新安装默认只显示三个服务商：
+
+- **火山引擎方舟**：打开[方舟控制台](https://console.volcengine.com/ark/apiKey)，注册或登录后开通所需模型，再创建 API Key。
+- **DeepSeek**：打开 [DeepSeek 开放平台](https://platform.deepseek.com/api_keys)，注册或登录、充值后创建 API Key。
+- **豆包 Web API**：打开[豆包网页](https://www.doubao.com/)注册账号；回到 Novaly 设置中心启动本地豆包服务，再在它打开的专用 Chrome 中登录。它不需要购买普通 API Key。
+
+从旧版本升级时，原先已经保存的其他服务商仍会保留，不会自动删除。
+
 1. 打开右上角 **设置中心**，在“厂商资源池”找到要配置的服务商。
 2. 点击 API Key 右侧的 **编辑**。
 3. 在“API 格式”中选择服务商实际提供的格式：
@@ -180,6 +188,16 @@ Worker 状态的意思：
 “基础地址”只填到版本目录即可，通常不要手工补 `/chat/completions`、`/messages` 或 `/models/...:generateContent`；Novaly 会根据所选格式自动补齐请求路径，并自动使用对应鉴权头、请求参数和响应解析方式。已有配置升级后默认使用 OpenAI 兼容格式，不会改变原来的调用方式。
 
 如果连接失败，先核对 API 格式、基础地址、模型 ID 和 Key 是否属于同一家服务商。选择 Claude 或 Gemini 格式后，不能继续填写 OpenAI 中转地址，除非该中转服务明确声明支持对应原生格式。
+
+### 手动添加其他 API
+
+在“设置中心 → 厂商资源池”点击 **手动添加 API**，依次填写显示名称、API 格式、基础地址、API Key 和模型 ID。保存后系统会自动添加并启用这个文本模型。
+
+- 服务商文档写“兼容 OpenAI”时选择 **OpenAI 兼容格式**。
+- 使用 Anthropic 原生 Messages API 时选择 **Claude 格式**。
+- 使用 Google 原生 generateContent API 时选择 **Gemini 格式**。
+
+一个服务商有多个模型时，可在该卡片的“文本”页继续点击 **添加**。添加后可启用模型并设为默认文本模型。
 
 ## 做出第一条视频
 

@@ -71,12 +71,6 @@ func SeedArk(db *gorm.DB, cfg config.Config) error {
 	if err := ensureDefaultVideoModel(db); err != nil {
 		return err
 	}
-	if err := ensurePixAPI(db, cfg); err != nil {
-		return err
-	}
-	if err := ensureXais(db, cfg); err != nil {
-		return err
-	}
 	return seedDeepSeek(db, cfg)
 }
 

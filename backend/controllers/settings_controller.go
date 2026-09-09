@@ -1,7 +1,9 @@
 package controllers
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -12,6 +14,52 @@ import (
 type SettingsController struct {
 	DB  *gorm.DB
 	Ark *services.ArkService
+}
+
+func (sc *SettingsController) CreateProvider(c *gin.Context) {
+	var input struct {
+		Name      string `json:"name"`
+		BaseURL   string `json:"baseUrl"`
+		APIFormat string `json:"apiFormat"`
+		APIKey    string `json:"apiKey"`
+		ModelName string `json:"modelName"`
+		ModelID   string `json:"modelId"`
+	}
+	if c.ShouldBindJSON(&input) != nil || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.BaseURL) == "" || strings.TrimSpace(input.ModelID) == "" {
+		fail(c, 400, "请填写 API 名称、基础地址和模型 ID")
+		return
+	}
+	format := services.NormalizeTextAPIFormat(input.APIFormat)
+	if format == "" {
+		fail(c, 400, "API 格式仅支持 OpenAI、Claude 或 Gemini")
+		return
+	}
+	provider := models.AIProvider{
+		Name: strings.TrimSpace(input.Name), Slug: fmt.Sprintf("custom-%d", time.Now().UnixNano()),
+		BaseURL: strings.TrimSuffix(strings.TrimSpace(input.BaseURL), "/"), APIFormat: format,
+		APIKey: strings.TrimSpace(input.APIKey), SortOrder: 100, Enabled: true,
+	}
+	modelName := strings.TrimSpace(input.ModelName)
+	if modelName == "" {
+		modelName = strings.TrimSpace(input.ModelID)
+	}
+	if err := sc.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&provider).Error; err != nil {
+			return err
+		}
+		var defaults int64
+		tx.Model(&models.AIModel{}).Where("capability = ? AND enabled = ? AND is_default = ?", "text", true, true).Count(&defaults)
+		model := models.AIModel{ProviderID: provider.ID, Name: modelName, ModelID: strings.TrimSpace(input.ModelID), Capability: "text", Enabled: true, IsDefault: defaults == 0}
+		if err := tx.Create(&model).Error; err != nil {
+			return err
+		}
+		provider.Models = []models.AIModel{model}
+		return nil
+	}); err != nil {
+		fail(c, 500, "添加 API 失败")
+		return
+	}
+	c.JSON(201, providerDTO(provider))
 }
 
 // RevealAPIKey intentionally returns the local provider key only after an explicit user action.

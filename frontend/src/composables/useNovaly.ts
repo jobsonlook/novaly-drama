@@ -10461,6 +10461,16 @@ ${descBlock}${legendBlock}
       providerKeys.value[provider.id] = ''
     } catch (e: any) { error.value = e.message }
   }
+  async function createProvider(input: { name: string; baseUrl: string; apiFormat: 'openai' | 'claude' | 'gemini'; apiKey: string; modelName: string; modelId: string }) {
+    try {
+      const provider = await api('/settings/providers', { method: 'POST', body: JSON.stringify(input) }) as Provider
+      providers.value = [...providers.value, provider]
+      return provider
+    } catch (e: any) {
+      error.value = e.message
+      throw e
+    }
+  }
   async function toggleKey(provider: Provider) {
     if (shownKeys.value[provider.id]) { shownKeys.value[provider.id] = false; return }
     try {
@@ -11768,6 +11778,7 @@ ${descBlock}${legendBlock}
     defaultStylizePrompt,
     deleteResource,
     saveProvider,
+    createProvider,
     toggleKey,
     openAddModel,
     openEditModel,

@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useNovalyInject } from '@/composables/useNovalyInject'
-import type { AIModel, Provider } from '@/types'
+import type { AIModel, Provider, TextAPIFormat } from '@/types'
 import LocalDoubaoService from '@/components/LocalDoubaoService.vue'
 import TrashView from '@/views/TrashView.vue'
 import {
@@ -25,6 +25,7 @@ const {
   imageModelsByProvider,
   videoModels,
   saveProvider,
+  createProvider,
   toggleKey,
   openAddModel,
   openEditModel,
@@ -45,6 +46,47 @@ const capabilityTabs: { value: Capability; label: string }[] = [
 
 const capabilityTabByProvider = reactive<Record<number, Capability>>({})
 const editingConnection = reactive<Record<number, boolean>>({})
+const providerDialogOpen = ref(false)
+const providerSaving = ref(false)
+const providerForm = reactive({ name: '', apiFormat: 'openai' as TextAPIFormat, baseUrl: '', apiKey: '', modelName: '', modelId: '' })
+
+const apiFormatOptions = [
+  { value: 'openai', label: 'OpenAI 兼容格式' },
+  { value: 'claude', label: 'Anthropic Claude 格式' },
+  { value: 'gemini', label: 'Google Gemini 格式' },
+] as const
+
+function suggestedBaseUrl(format: TextAPIFormat) {
+  if (format === 'claude') return 'https://api.anthropic.com/v1'
+  if (format === 'gemini') return 'https://generativelanguage.googleapis.com/v1beta'
+  return 'https://api.openai.com/v1'
+}
+
+function openProviderDialog() {
+  Object.assign(providerForm, { name: '', apiFormat: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: '', modelName: '', modelId: '' })
+  providerDialogOpen.value = true
+}
+
+function onProviderFormatChange(format: TextAPIFormat) {
+  providerForm.baseUrl = suggestedBaseUrl(format)
+}
+
+async function submitProvider() {
+  if (!providerForm.name.trim() || !providerForm.baseUrl.trim() || !providerForm.modelId.trim()) {
+    ElMessage.warning('请填写 API 名称、基础地址和模型 ID')
+    return
+  }
+  providerSaving.value = true
+  try {
+    const provider = await createProvider({ ...providerForm })
+    capabilityTabByProvider[provider.id] = 'text'
+    editingConnection[provider.id] = true
+    providerDialogOpen.value = false
+    ElMessage.success('API 和文本模型已添加，可以测试连接')
+  } finally {
+    providerSaving.value = false
+  }
+}
 
 const downloadDirSupported = isDownloadDirSupported()
 const downloadDirName = ref<string | null>(null)
@@ -144,7 +186,7 @@ function baseUrlPlaceholder(provider: Provider) {
   return 'https://api.openai.com/v1'
 }
 
-function apiFormatHint(provider: Provider) {
+function apiFormatHint(provider: Pick<Provider, 'apiFormat'>) {
   if (provider.apiFormat === 'claude') return '按 Anthropic Messages API 请求，使用 x-api-key 鉴权。'
   if (provider.apiFormat === 'gemini') return '按 Gemini generateContent 请求，使用 x-goog-api-key 鉴权。'
   return '按 OpenAI Chat Completions 请求，也兼容 DeepSeek、火山方舟等兼容接口。'
@@ -349,8 +391,15 @@ function onSetDefaultClick(model: AIModel) {
         <div class="section-head">
           <div>
             <h2>厂商资源池</h2>
-            <p>管理各服务商的 API Key 与可用模型；按能力切换列表。</p>
+            <p>默认提供火山引擎、DeepSeek 和豆包 Web API，也可以添加其他模型 API。</p>
           </div>
+          <el-button type="primary" @click="openProviderDialog">+ 手动添加 API</el-button>
+        </div>
+
+        <div class="api-guides">
+          <a href="https://console.volcengine.com/ark/apiKey" target="_blank" rel="noreferrer"><b>火山引擎方舟</b><span>注册/登录 → 开通模型 → 创建 API Key</span></a>
+          <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer"><b>DeepSeek</b><span>注册/登录 → 充值 → 创建 API Key</span></a>
+          <a href="https://www.doubao.com/" target="_blank" rel="noreferrer"><b>豆包 Web API</b><span>注册豆包账号；在本地服务打开的 Chrome 中登录</span></a>
         </div>
 
         <div class="provider-grid">
@@ -497,6 +546,37 @@ function onSetDefaultClick(model: AIModel) {
           </article>
         </div>
       </section>
+
+      <el-dialog v-model="providerDialogOpen" title="手动添加模型 API" width="min(520px, 92vw)">
+        <el-form label-position="top">
+          <el-form-item label="显示名称">
+            <el-input v-model="providerForm.name" placeholder="例如：我的 OpenAI 中转" />
+          </el-form-item>
+          <el-form-item label="API 格式">
+            <el-select v-model="providerForm.apiFormat" style="width: 100%" @change="onProviderFormatChange">
+              <el-option v-for="item in apiFormatOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="基础地址">
+            <el-input v-model="providerForm.baseUrl" :placeholder="suggestedBaseUrl(providerForm.apiFormat)" />
+            <small>{{ apiFormatHint(providerForm) }}</small>
+          </el-form-item>
+          <el-form-item label="API Key">
+            <el-input v-model="providerForm.apiKey" type="password" show-password placeholder="填写服务商提供的 API Key" />
+          </el-form-item>
+		  <el-form-item label="模型 ID">
+			<el-input v-model="providerForm.modelId" placeholder="照服务商文档填写，例如 gpt-4.1-mini" />
+		  </el-form-item>
+		  <el-form-item label="模型显示名称（可选）">
+			<el-input v-model="providerForm.modelName" placeholder="留空时使用模型 ID" />
+		  </el-form-item>
+        </el-form>
+		<el-alert type="info" :closable="false" title="系统会同时添加并启用这个文本模型；以后仍可继续添加更多模型。" />
+        <template #footer>
+          <el-button @click="providerDialogOpen = false">取消</el-button>
+          <el-button type="primary" :loading="providerSaving" @click="submitProvider">添加 API</el-button>
+        </template>
+      </el-dialog>
     </template>
 
     <template v-else-if="settingsTab === 'download'">
@@ -800,6 +880,38 @@ function onSetDefaultClick(model: AIModel) {
   font-size: 12px;
   line-height: 1.55;
   color: #9a9288;
+}
+
+.api-guides {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.api-guides a {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid #3c3731;
+  border-radius: 10px;
+  background: #181614;
+  color: #f2ebe3;
+  text-decoration: none;
+}
+
+.api-guides a:hover {
+  border-color: #ff785a;
+}
+
+.api-guides span {
+  color: #9a9288;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 900px) {
+  .api-guides { grid-template-columns: 1fr; }
 }
 
 .cap-tabs {
