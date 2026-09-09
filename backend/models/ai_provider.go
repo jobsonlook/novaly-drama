@@ -7,6 +7,7 @@ type AIProvider struct {
 	Name      string    `json:"name"`
 	Slug      string    `gorm:"uniqueIndex" json:"slug"`
 	BaseURL   string    `json:"baseUrl"`
+	APIFormat string    `gorm:"size:16;not null;default:openai" json:"apiFormat"`
 	APIKey    string    `json:"-"`
 	SortOrder int       `json:"sortOrder"`
 	Enabled   bool      `json:"enabled"`
@@ -30,6 +31,7 @@ type ProviderDTO struct {
 	Name         string    `json:"name"`
 	Slug         string    `json:"slug"`
 	BaseURL      string    `json:"baseUrl"`
+	APIFormat    string    `json:"apiFormat"`
 	APIKeyMasked string    `json:"apiKeyMasked"`
 	HasAPIKey    bool      `json:"hasApiKey"`
 	SortOrder    int       `json:"sortOrder"`

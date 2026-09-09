@@ -44,10 +44,11 @@ func (sc *SettingsController) UpdateProvider(c *gin.Context) {
 		return
 	}
 	var input struct {
-		Name    string  `json:"name"`
-		BaseURL string  `json:"baseUrl"`
-		APIKey  *string `json:"apiKey"`
-		Enabled *bool   `json:"enabled"`
+		Name      string  `json:"name"`
+		BaseURL   string  `json:"baseUrl"`
+		APIFormat *string `json:"apiFormat"`
+		APIKey    *string `json:"apiKey"`
+		Enabled   *bool   `json:"enabled"`
 	}
 	if c.ShouldBindJSON(&input) != nil {
 		fail(c, 400, "请求格式错误")
@@ -58,6 +59,14 @@ func (sc *SettingsController) UpdateProvider(c *gin.Context) {
 	}
 	if strings.TrimSpace(input.BaseURL) != "" {
 		provider.BaseURL = strings.TrimSuffix(strings.TrimSpace(input.BaseURL), "/")
+	}
+	if input.APIFormat != nil {
+		format := services.NormalizeTextAPIFormat(*input.APIFormat)
+		if format == "" {
+			fail(c, 400, "API 格式仅支持 OpenAI、Claude 或 Gemini")
+			return
+		}
+		provider.APIFormat = format
 	}
 	if input.APIKey != nil {
 		provider.APIKey = strings.TrimSpace(*input.APIKey)
@@ -172,7 +181,11 @@ func (sc *SettingsController) TestProvider(c *gin.Context) {
 	c.JSON(200, gin.H{"message": "连接成功"})
 }
 func providerDTO(p models.AIProvider) models.ProviderDTO {
-	return models.ProviderDTO{ID: p.ID, Name: p.Name, Slug: p.Slug, BaseURL: p.BaseURL, APIKeyMasked: maskKey(p.APIKey), HasAPIKey: p.APIKey != "", SortOrder: p.SortOrder, Enabled: p.Enabled, Models: p.Models}
+	format := services.NormalizeTextAPIFormat(p.APIFormat)
+	if format == "" {
+		format = services.TextAPIFormatOpenAI
+	}
+	return models.ProviderDTO{ID: p.ID, Name: p.Name, Slug: p.Slug, BaseURL: p.BaseURL, APIFormat: format, APIKeyMasked: maskKey(p.APIKey), HasAPIKey: p.APIKey != "", SortOrder: p.SortOrder, Enabled: p.Enabled, Models: p.Models}
 }
 func maskKey(key string) string {
 	if len(key) < 9 {

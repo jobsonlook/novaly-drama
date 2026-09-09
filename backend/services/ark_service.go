@@ -2389,28 +2389,7 @@ func (s *ArkService) Chat(provider models.AIProvider, body map[string]any) (stri
 }
 
 func (s *ArkService) chat(provider models.AIProvider, body map[string]any) (string, error) {
-	raw, err := s.post(provider, "/chat/completions", prepareChatBody(provider, body))
-	if err != nil {
-		return "", err
-	}
-	var decoded struct {
-		Choices []struct {
-			Message struct {
-				Content json.RawMessage `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err = json.Unmarshal(raw, &decoded); err != nil {
-		return "", err
-	}
-	if len(decoded.Choices) == 0 {
-		return "", errors.New("响应没有 choices")
-	}
-	content := strings.TrimSpace(decodeChatContent(decoded.Choices[0].Message.Content))
-	if content == "" {
-		return "", errors.New("响应内容为空")
-	}
-	return content, nil
+	return s.chatByAPIFormat(provider, body)
 }
 
 // prepareChatBody copies the payload when a provider needs extra fields.

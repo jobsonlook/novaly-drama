@@ -10455,7 +10455,7 @@ ${descBlock}${legendBlock}
   async function saveProvider(provider: Provider) {
     try {
       const key = providerKeys.value[provider.id]
-      const payload = { name: provider.name, baseUrl: provider.baseUrl, ...(key ? { apiKey: key } : {}) }
+      const payload = { name: provider.name, baseUrl: provider.baseUrl, apiFormat: provider.apiFormat, ...(key ? { apiKey: key } : {}) }
       const p = await api(`/settings/providers/${provider.id}`, { method: 'PUT', body: JSON.stringify(payload) })
       providers.value = providers.value.map(x => x.id === p.id ? p : x)
       providerKeys.value[provider.id] = ''

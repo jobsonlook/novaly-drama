@@ -155,6 +155,32 @@ Worker 状态的意思：
 
 设置并发数为 2，不代表一定能同时生成两个视频。至少要有两个已登录并且仍有额度的账号，才能真正两路并行。
 
+## 配置文本模型 API（OpenAI、Claude、Gemini）
+
+自动写作、剧本拆分、提示词优化等功能需要一个文本模型。Novaly 可以直接适配三种常见接口格式，不需要自己修改代码。
+
+1. 打开右上角 **设置中心**，在“厂商资源池”找到要配置的服务商。
+2. 点击 API Key 右侧的 **编辑**。
+3. 在“API 格式”中选择服务商实际提供的格式：
+   - **OpenAI 兼容格式**：OpenAI，以及说明文档写着“兼容 OpenAI”的 DeepSeek、火山方舟和其他中转接口。
+   - **Anthropic Claude 格式**：Anthropic 官方 Claude Messages API。
+   - **Google Gemini 格式**：Google 官方 Gemini `generateContent` API。
+4. 填写 API Key 和基础地址，点击 **保存配置**。
+5. 在“文本”页添加或启用模型，模型 ID 必须照服务商控制台原样填写。
+6. 点击 **测试连接**。提示“连接成功”后即可使用。
+
+常见官方基础地址：
+
+| API 格式 | 基础地址示例 | 模型 ID 示例 |
+| --- | --- | --- |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4.1-mini` |
+| Claude | `https://api.anthropic.com/v1` | `claude-sonnet-4-20250514` |
+| Gemini | `https://generativelanguage.googleapis.com/v1beta` | `gemini-2.5-pro` |
+
+“基础地址”只填到版本目录即可，通常不要手工补 `/chat/completions`、`/messages` 或 `/models/...:generateContent`；Novaly 会根据所选格式自动补齐请求路径，并自动使用对应鉴权头、请求参数和响应解析方式。已有配置升级后默认使用 OpenAI 兼容格式，不会改变原来的调用方式。
+
+如果连接失败，先核对 API 格式、基础地址、模型 ID 和 Key 是否属于同一家服务商。选择 Claude 或 Gemini 格式后，不能继续填写 OpenAI 中转地址，除非该中转服务明确声明支持对应原生格式。
+
 ## 做出第一条视频
 
 第一次建议只做一个测试项目、一个短镜头，不要立即批量生成几百个分镜。

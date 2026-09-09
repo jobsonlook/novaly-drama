@@ -138,8 +138,16 @@ function apiKeyPlaceholder(provider: Provider) {
 
 function baseUrlPlaceholder(provider: Provider) {
   if (provider.slug === 'doubao-web-api') return 'http://127.0.0.1:8080/api/v3'
+  if (provider.apiFormat === 'claude') return 'https://api.anthropic.com/v1'
+  if (provider.apiFormat === 'gemini') return 'https://generativelanguage.googleapis.com/v1beta'
   if (provider.slug === 'deepseek') return 'https://api.deepseek.com/v1'
-  return 'https://…'
+  return 'https://api.openai.com/v1'
+}
+
+function apiFormatHint(provider: Provider) {
+  if (provider.apiFormat === 'claude') return '按 Anthropic Messages API 请求，使用 x-api-key 鉴权。'
+  if (provider.apiFormat === 'gemini') return '按 Gemini generateContent 请求，使用 x-goog-api-key 鉴权。'
+  return '按 OpenAI Chat Completions 请求，也兼容 DeepSeek、火山方舟等兼容接口。'
 }
 
 function providerHint(provider: Provider) {
@@ -375,6 +383,12 @@ function onSetDefaultClick(model: AIModel) {
                 <el-button size="small" text type="primary" @click="openConnection(provider)">编辑</el-button>
               </div>
               <div v-else class="connect-form">
+                <el-select v-model="provider.apiFormat" size="small" aria-label="文本 API 格式">
+                  <el-option label="OpenAI 兼容格式" value="openai" />
+                  <el-option label="Anthropic Claude 格式" value="claude" />
+                  <el-option label="Google Gemini 格式" value="gemini" />
+                </el-select>
+                <small class="api-format-hint">{{ apiFormatHint(provider) }}仅用于文本模型。</small>
                 <el-input
                   v-model="providerKeys[provider.id]"
                   :type="shownKeys[provider.id] ? 'text' : 'password'"

@@ -151,7 +151,8 @@ export type Project = {
   resources: Resource[]
 }
 export type AIModel = { id: number; providerId: number; name: string; modelId: string; capability: 'text' | 'image' | 'video'; enabled: boolean; isDefault: boolean }
-export type Provider = { id: number; name: string; slug: string; baseUrl: string; apiKeyMasked: string; hasApiKey: boolean; enabled: boolean; models: AIModel[] }
+export type TextAPIFormat = 'openai' | 'claude' | 'gemini'
+export type Provider = { id: number; name: string; slug: string; baseUrl: string; apiFormat: TextAPIFormat; apiKeyMasked: string; hasApiKey: boolean; enabled: boolean; models: AIModel[] }
 
 export type SceneReference = {
   key: string
