@@ -55,6 +55,32 @@ fi
 
 mkdir -p "$SESSION_DIR"
 
+# Chrome reuses an existing process when the same user-data-dir is already open,
+# even if that process listens on another CDP port. That makes the requested port
+# wait forever. Clean only orphaned Chrome processes bound to this exact session.
+if [[ "$(uname)" != "Windows_NT" ]]; then
+  SESSION_PIDS=()
+  while IFS= read -r pid; do
+    [[ -z "$pid" ]] && continue
+    command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    if [[ "$command_line" == *"--user-data-dir=$SESSION_DIR"* ]]; then
+      SESSION_PIDS+=("$pid")
+    fi
+  done < <(pgrep -f 'Google Chrome|Chromium|chromium' 2>/dev/null || true)
+  if (( ${#SESSION_PIDS[@]} > 0 )); then
+    echo "Stopping stale Chrome for this session: ${SESSION_PIDS[*]}"
+    kill -TERM "${SESSION_PIDS[@]}" 2>/dev/null || true
+    for _ in {1..20}; do
+      alive=0
+      for pid in "${SESSION_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then alive=1; break; fi
+      done
+      (( alive == 0 )) && break
+      sleep 0.25
+    done
+  fi
+fi
+
 CHROME=""
 if [[ -n "${CHROME_BIN:-}" ]]; then
   CHROME="$CHROME_BIN"
