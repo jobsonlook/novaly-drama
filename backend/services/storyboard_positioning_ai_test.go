@@ -40,6 +40,16 @@ func TestWithPositioningConstraintsSkipsSeatedLockWhenStandingOnly(t *testing.T)
 	}
 }
 
+func TestWithPositioningConstraintsKeepsNonPhotorealFacesClear(t *testing.T) {
+	got := withPositioningConstraints("唐小满(左前)站着。", "国风 3D 动漫，PBR 材质")
+	if !strings.Contains(got, "严禁在人脸或画面任何位置添加马赛克") {
+		t.Fatalf("non-photoreal positioning image must keep faces clear:\n%s", got)
+	}
+	if strings.Contains(got, "面部必须打满马赛克") {
+		t.Fatalf("non-photoreal positioning image must not request mosaic:\n%s", got)
+	}
+}
+
 func TestPositioningPoseCueFromTableScript(t *testing.T) {
 	cue := positioningPoseCueFromScript("【0-3秒】镜头：包厢长桌，韩铮举杯；小鹿小南坐在两侧。")
 	if !strings.Contains(cue, "坐") {

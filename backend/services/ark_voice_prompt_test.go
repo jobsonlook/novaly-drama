@@ -388,6 +388,16 @@ func TestOppositeSceneGridCell(t *testing.T) {
 	}
 }
 
+func TestBuildSceneReversePromptKeepsNonPhotorealFacesClear(t *testing.T) {
+	got := BuildSceneReversePrompt("归元宗山门", "", "国风 3D 动漫，PBR 材质")
+	if !strings.Contains(got, "严禁添加马赛克") {
+		t.Fatalf("non-photoreal reverse image must keep faces clear:\n%s", got)
+	}
+	if strings.Contains(got, "面部必须打满马赛克") || strings.Contains(got, "换成真人") {
+		t.Fatalf("non-photoreal reverse image must not request live-action mosaic:\n%s", got)
+	}
+}
+
 func TestBuildSceneReversePromptIsNotAFlip(t *testing.T) {
 	got := BuildSceneReversePrompt("私人会所包厢", "长桌沙发")
 	for _, need := range []string{"按图1每个火柴人旁的姓名", "骨架优先", "图2", "禁止换人", "俯视格", "反打一侧", "反打图固定要求", "姓名只认图1", "禁止同一姓名出现两次", "人物数=马赛克数=姓名数", "私人会所包厢"} {

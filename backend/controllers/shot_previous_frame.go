@@ -33,6 +33,10 @@ func (sc *ShotController) PreviousFrame(c *gin.Context) {
 		return
 	}
 	projectID := episode.ProjectID
+	var project models.Project
+	_ = sc.DB.Select("style", "visual_manual").First(&project, projectID).Error
+	projectStyle := strings.TrimSpace(project.Style + "\n" + project.VisualManual)
+	maskFaces := services.UsesPhotorealPeople(projectStyle)
 
 	// Continuity must come from the immediately preceding shot. Do not silently
 	// skip an unfinished/missing shot and borrow a frame from an older scene.
@@ -92,20 +96,22 @@ func (sc *ShotController) PreviousFrame(c *gin.Context) {
 	// it synchronously blocked this endpoint for up to ~30 minutes. The raw frame is
 	// usable immediately; the annotated version overwrites it when ready and bumps
 	// updated_at so the versioned image URL refreshes in the UI.
-	go func(projectID uint, shotSnapshot models.Shot, frameRes models.Resource) {
-		annotated := sc.annotateTransitionFrame(projectID, shotSnapshot, frameRes)
-		if annotated == nil {
-			return
-		}
-		if _, err := sc.Storage.SaveResourceImageBytes(projectID, frameRes.ID, annotated); err != nil {
-			log.Printf("transition frame annotate save failed (keeping raw frame): %v", err)
-			return
-		}
-		if err := sc.DB.Model(&models.Resource{}).Where("id = ?", frameRes.ID).Update("updated_at", time.Now()).Error; err != nil {
-			log.Printf("transition frame annotate touch failed: %v", err)
-		}
-		log.Printf("transition frame %d annotated (face mosaic)", frameRes.ID)
-	}(projectID, shot, res)
+	if maskFaces {
+		go func(projectID uint, shotSnapshot models.Shot, frameRes models.Resource) {
+			annotated := sc.annotateTransitionFrame(projectID, shotSnapshot, frameRes)
+			if annotated == nil {
+				return
+			}
+			if _, err := sc.Storage.SaveResourceImageBytes(projectID, frameRes.ID, annotated); err != nil {
+				log.Printf("transition frame annotate save failed (keeping raw frame): %v", err)
+				return
+			}
+			if err := sc.DB.Model(&models.Resource{}).Where("id = ?", frameRes.ID).Update("updated_at", time.Now()).Error; err != nil {
+				log.Printf("transition frame annotate touch failed: %v", err)
+			}
+			log.Printf("transition frame %d annotated (face mosaic)", frameRes.ID)
+		}(projectID, shot, res)
+	}
 	fillResourceURLs(&res, sc.Storage)
 
 	// Prepend it as a scene ref so it becomes the first reference image for this shot.
@@ -150,11 +156,17 @@ func (sc *ShotController) PreviousFrame(c *gin.Context) {
 	}
 
 	fillShotFields(&shot, sc.Storage)
+	message := fmt.Sprintf("已提取第 %s 镜尾帧并设为当前分镜首张参考图", prev.Label)
+	if maskFaces {
+		message += "；真人项目的人脸马赛克正在后台处理，稍后自动更新"
+	} else {
+		message += "；当前为非真人画风，已保留原图，不打马赛克"
+	}
 	c.JSON(200, gin.H{
 		"resource":   res,
 		"shot":       shot,
-		"annotating": true,
-		"message":    fmt.Sprintf("已提取第 %s 镜尾帧并设为当前分镜首张参考图；人脸马赛克后台处理中，稍后自动更新", prev.Label),
+		"annotating": maskFaces,
+		"message":    message,
 	})
 }
 

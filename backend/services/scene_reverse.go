@@ -51,16 +51,24 @@ const SceneReverseRefLegend = "参考图：图1为反打镜头线稿（唯一的
 // matching the face privacy and cast labeling rules used by positioning images.
 const SceneReverseAnnotationConstraint = "【反打图固定要求 · 姓名只认图1】所有人物的面部必须打满马赛克，马赛克彻底完全遮住人脸，五官完全不可见。人物身份、姓名以及姓名所在的人物位置，只能读取图1反打线稿；图2中已有的姓名文字、马赛克及其位置全部忽略，禁止照抄。每个人只出现一次姓名，姓名紧贴该人物头顶或肩旁；禁止同一姓名出现两次，禁止一个人旁边出现两个姓名，禁止把远处人物姓名放到近处人物身上。输出前逐人核对：人物数=马赛克数=姓名数，且每个姓名唯一并与图1对应。姓名做醒目、清晰、大号的中文「示意图悬浮标注」，不要做成衣服上的实体名牌、贴纸、号码布或缝在服装上的文字；除这组人物姓名外，不要其他文字、水印、logo 或 UI 边框。"
 
+const SceneReverseClearFaceConstraint = "【反打图固定要求 · 姓名只认图1】当前项目为非真人画风，人物必须保持项目的 3D/动漫/插画造型，保留清晰完整的面部，严禁添加马赛克、模糊遮挡或隐私贴纸。人物身份、姓名以及姓名所在的人物位置，只能读取图1反打线稿；每个人只出现一次姓名，姓名紧贴该人物头顶或肩旁，并使用醒目、清晰、大号的中文示意图悬浮标注；除人物姓名外，不要其他文字、水印、logo 或 UI 边框。"
+
 // BuildSceneReversePrompt turns the reverse line drawing into a photoreal reverse shot.
-func BuildSceneReversePrompt(name, description string) string {
+func BuildSceneReversePrompt(name, description string, style ...string) string {
 	subject := sceneReverseCleanSubject(name, description, "把图1的火柴人换成")
-	return fmt.Sprintf(`【骨架优先 · 最高优先级】图1是反打镜头的火柴人线稿，这就是成片要拍到的画面。生成结果必须像把图1的火柴人换成真人：机位、透视、谁在前景/后景、谁正脸/背影/过肩、门在近还是远，全部按图1，不要按图2构图。
+	annotation := SceneReverseAnnotationConstraint
+	personType := "真人"
+	if len(style) > 0 && !UsesPhotorealPeople(style[0]) {
+		annotation = SceneReverseClearFaceConstraint
+		personType = "与项目画风一致的人物"
+	}
+	return fmt.Sprintf(`【骨架优先 · 最高优先级】图1是反打镜头的火柴人线稿，这就是成片要拍到的画面。生成结果必须把图1的火柴人换成%s：机位、透视、谁在前景/后景、谁正脸/背影/过肩、门在近还是远，全部按图1，不要按图2构图。
 【参考图】图1=反打线稿（唯一的构图、人物位置、姓名依据），图2=原镜头/人物（只锁房间、五官服装，禁止复制图2里的姓名文字和马赛克位置），俯视格只锁平面布局（禁止抄俯视），反打一侧空镜只锁对面看到的房间（门、沙发、墙），禁止按空镜里的无人构图摆人。其余=角色定妆。
 禁止再拍成图2那个机位。如果成片里仍是图2那种「门口往里拍、近处背影、远处正脸」，视为失败。
-按图1每个火柴人旁的姓名，把它替换成对应人物定妆参考中的真人；若图2的旧姓名位置与图1冲突，绝对以图1为准。禁止换人、加人、少人。房间材质优先按反打一侧空镜，空镜没有的细节再按图2。
+按图1每个火柴人旁的姓名，把它替换成对应人物定妆参考中的%s；若图2的旧姓名位置与图1冲突，绝对以图1为准。禁止换人、加人、少人。房间材质优先按反打一侧空镜，空镜没有的细节再按图2。
 %s
 遵守轴线：不要左右翻转图1。
-【空间】%s`, SceneReverseAnnotationConstraint, subject)
+【空间】%s`, personType, personType, annotation, subject)
 }
 
 func withSceneReverseSkeletonLineArt(prompt string) string {
@@ -217,6 +225,7 @@ func (s *ArkService) GenerateSceneReverseCandidates(
 	count int,
 	spec ImageGenSpec,
 	onProgress ImageGenProgress,
+	style ...string,
 ) ([]string, string, error) {
 	if ProviderRequiresAPIKey(provider) && provider.APIKey == "" {
 		return nil, "", fmt.Errorf("请先在设置中心填写 API Key")
@@ -229,11 +238,19 @@ func (s *ArkService) GenerateSceneReverseCandidates(
 		prompt = withSceneReverseSkeletonGuide(prompt)
 	}
 	if sceneReversePhotorealNeedsRebuild(prompt) {
-		prompt = withSceneReverseSkeletonGuide(BuildSceneReversePrompt("", StripImageRefLegend(prompt)))
+		prompt = withSceneReverseSkeletonGuide(BuildSceneReversePrompt("", StripImageRefLegend(prompt), style...))
+	}
+	if len(style) > 0 && !UsesPhotorealPeople(style[0]) {
+		prompt = strings.ReplaceAll(prompt, SceneReverseAnnotationConstraint, SceneReverseClearFaceConstraint)
+		prompt = strings.ReplaceAll(prompt, "换成真人", "换成与项目画风一致的人物")
+		prompt = strings.ReplaceAll(prompt, "中的真人", "中与项目画风一致的人物")
 	}
 	prompt = StripImageRefLegend(prompt)
 	if !strings.Contains(prompt, "反打镜头线稿") && !strings.Contains(prompt, "反打空间线稿") {
 		prompt = PrependImageRefLegend(prompt, SceneReverseRefLegend)
+	}
+	if len(style) > 0 && !UsesPhotorealPeople(style[0]) {
+		prompt = strings.ReplaceAll(prompt, "换成真人", "换成与项目画风一致的人物")
 	}
 	prompt = withNoLogo(prompt)
 	prompt = clampImagePrompt(prompt, 1600)

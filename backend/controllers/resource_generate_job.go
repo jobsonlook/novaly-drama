@@ -896,7 +896,7 @@ func (rc *ResourceController) runImageGenerationJob(jobID, projectID uint, resTy
 		})
 	case "positioning":
 		urls, prompt, genErr = rc.Ark.GeneratePositioningCandidates(
-			provider, model, strings.TrimSpace(input.Description), refImages, count, spec, onProgress,
+			provider, model, strings.TrimSpace(input.Description), refImages, count, spec, onProgress, project.Style,
 		)
 	case "positioning_skeleton":
 		if len(refImages) > 1 {
@@ -920,7 +920,7 @@ func (rc *ResourceController) runImageGenerationJob(jobID, projectID uint, resTy
 		)
 	case "scene_reverse":
 		urls, prompt, genErr = rc.Ark.GenerateSceneReverseCandidates(
-			provider, model, strings.TrimSpace(input.Description), refImages, count, spec, onProgress,
+			provider, model, strings.TrimSpace(input.Description), refImages, count, spec, onProgress, project.Style,
 		)
 	case "scene_panorama":
 		urls, prompt, genErr = rc.Ark.GenerateScenePanoramaCandidates(

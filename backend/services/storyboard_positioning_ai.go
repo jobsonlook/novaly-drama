@@ -54,7 +54,7 @@ func (s *ArkService) AnalyzeShotPositioning(
    - 为每个角色追踪「九格位置、坐站姿态、朝向、面对对象」。文案未写走近、退后、绕行、换位、起身、坐下等动作时，沿用最近同场镜头，禁止无动作跳格、左右互换或忽坐忽站。
    - 近景、特写、过肩、反打描述的是摄影机视角，不等于人物换位。屏幕左右若与场景九格冲突，以同场全景/中景建立的空间关系为准；反打只能改变朝向描述，不能凭空交换人物位置。
    - 多条信息冲突时按「当前镜明确动作 > 最近同场全景/中景 > 最近同场其他镜 > 更早镜头」裁决；无法确定时保持上一稳定站位，不自行发明移动。
-6. 画面规格：16:9 横构图；质感跟项目画面风格走（写实就写实、插画就插画）；系统会另行强制「人脸马赛克 + 身上标名」，正文中不要要求露脸或禁止文字标注。
+6. 画面规格：16:9 横构图；质感跟项目画面风格走（写实就写实、插画就插画）；系统会按项目画风另行处理人物姓名标注及真人隐私，正文中不要自行要求马赛克、露脸或禁止文字标注。
 7. 正文控制在 180～420 字，具体可执行，避免空泛形容词堆砌。
 8. 输出格式必须严格分为两段：
    - 第一段：站位画面描述正文（不要在正文里写「图1/图2」用途说明）。
@@ -227,9 +227,11 @@ func splitPositioningPrompt(prompt string) (body, legend string) {
 // Faces stay fully mosaicked; names are schematic floating labels (not physical name tags).
 const PositioningFaceMosaicConstraint = "【站位图固定要求】所有人物的面部必须打满马赛克，马赛克彻底完全遮住人脸，五官完全不可见；每个人物旁边用醒目、清晰、大号的中文名字做「示意图悬浮标注」（浮在人物身旁或上方，像分镜标注文字），不要做成衣服上的实体名牌、贴纸、号码布或缝在服装上的文字；不要水印、不要 logo、不要 UI 边框。"
 
+const PositioningFaceClearConstraint = "【站位图固定要求】当前项目为非真人画风，人物必须保持项目的 3D/动漫/插画造型，保留清晰完整的面部，严禁在人脸或画面任何位置添加马赛克、模糊遮挡或隐私贴纸；每个人物旁边用醒目、清晰、大号的中文名字做「示意图悬浮标注」（浮在人物身旁或上方，像分镜标注文字），不要做成衣服上的实体名牌、贴纸、号码布或缝在服装上的文字；不要水印、不要 logo、不要 UI 边框。"
+
 const PositioningCastFromPrompt = "文案里的出场人物都要画进画面（含群演），每人只出现一次；禁止把次要角色画成焦点人物的分身或双胞胎。【坐站】严格按提示词的坐着/站着/起身执行：写坐着的人必须坐在椅凳或桌边，禁止改成全员站立；只有写起身/站着的人才站立。角色定妆参考图若是站姿全身，也只借鉴面容服装，姿势以提示词为准。"
 
-const PositioningCastFromSkeleton = "人数必须与图1骨架一致：图1骨架上的每一个具名火柴人都必须一对一替换为同位置的一个真人，一个不能少、一个不能多，禁止只挑部分人物出画。每人只出现一次。图2起不得改变图1人数；角色定妆参考图若是站姿全身，只借鉴服装，禁止复制定妆图的站立姿势和白底构图。"
+const PositioningCastFromSkeleton = "人数必须与图1骨架一致：图1骨架上的每一个具名火柴人都必须一对一替换为同位置、与项目画风一致的人物，一个不能少、一个不能多，禁止只挑部分人物出画。每人只出现一次。图2起不得改变图1人数；角色定妆参考图若是站姿全身，只借鉴造型服装，禁止复制定妆图的站立姿势和白底构图。"
 
 // PositioningPoseHint is appended when the shot script implies seated dining /
 // lounge blocking so the image model does not default everyone to standing.
@@ -237,16 +239,23 @@ const PositioningPoseHint = "【姿态锁定】若上文写了「坐着」，对
 
 // PositioningSkeletonConstraint is prepended on pass 2 so the photoreal 站位图
 // follows the stick-figure layout instead of standing character sheets.
-const PositioningSkeletonConstraint = "【骨架优先 · 最高优先级】图1是火柴人/线稿站位骨架。生成结果必须像把图1的火柴人换成真人：机位、桌子位置、谁在左/右/前/后、谁坐谁站、面朝哪边，全部按图1，不要按文字站位改图1。图2起只提供场景材质和人物五官服装。文字与图1冲突时以图1为准。"
+const PositioningSkeletonConstraint = "【骨架优先 · 最高优先级】图1是火柴人/线稿站位骨架。生成结果必须把图1的火柴人替换成与项目画风一致的人物：机位、桌子位置、谁在左/右/前/后、谁坐谁站、面朝哪边，全部按图1，不要按文字站位改图1。图2起只提供场景材质和人物造型服装。文字与图1冲突时以图1为准。"
 
 var positioningMetaBlockRE = regexp.MustCompile(`(?m)^【(?:站位图固定要求|姿态锁定|骨架优先|骨架硬约束)】.*\n?`)
 var figureNumberRE = regexp.MustCompile(`图(\d+)`)
 var figure1ChunkRE = regexp.MustCompile(`图1为(.+?)(?:，图\d+为|$)`)
 
-func withPositioningConstraints(prompt string) string {
+func withPositioningConstraints(prompt string, style ...string) string {
 	p := strings.TrimSpace(prompt)
 	useSkeleton := positioningLooksLikeSkeletonGuide(p)
 	mosaic := PositioningFaceMosaicConstraint
+	visualStyle := p
+	if len(style) > 0 && strings.TrimSpace(style[0]) != "" {
+		visualStyle = style[0]
+	}
+	if !UsesPhotorealPeople(visualStyle) {
+		mosaic = PositioningFaceClearConstraint
+	}
 	if useSkeleton {
 		mosaic += PositioningCastFromSkeleton
 	} else {
@@ -327,6 +336,7 @@ func (s *ArkService) GeneratePositioningCandidates(
 	count int,
 	spec ImageGenSpec,
 	onProgress ImageGenProgress,
+	style ...string,
 ) ([]string, string, error) {
 	if ProviderRequiresAPIKey(provider) && provider.APIKey == "" {
 		return nil, "", fmt.Errorf("请先在设置中心填写 API Key")
@@ -352,7 +362,7 @@ func (s *ArkService) GeneratePositioningCandidates(
 	}
 
 	prompt = clampImagePrompt(prompt, 1500)
-	prompt = withPositioningConstraints(prompt)
+	prompt = withPositioningConstraints(prompt, style...)
 
 	if onProgress != nil {
 		onProgress(0, count, "按已确认的火柴人骨架生成正式站位图…")
