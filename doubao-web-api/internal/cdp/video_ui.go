@@ -2593,6 +2593,8 @@ func markVideoCaptureSubmitBaseline(ctx context.Context) error {
 		if (!cap) return { ok: false };
 		cap.chunkBaseline = (cap.chunks || []).length;
 		cap.videoURLBaseline = (cap.videoURLs || []).length;
+		cap.fallbackAPIBaseline = (cap.fallbackApis || []).length;
+		cap.vidBaseline = (cap.vids || []).length;
 		return { ok: true };
 	})()`
 	var out map[string]any

@@ -345,12 +345,16 @@ func (b *Browser) collectCapturedFallbackAPIs(ctx context.Context) ([]string, st
 	    for (const m of text.matchAll(/"(?:vid|video_id)"\s*:\s*"(v0[^"]+)"/g)) addVid(m[1]);
 	  }
 	  const cap = window.__doubaoVideoCapture || {};
-	  if (Array.isArray(cap.fallbackApis)) cap.fallbackApis.forEach(addApi);
-	  if (Array.isArray(cap.vids)) cap.vids.forEach(addVid);
+	  const apiStart = Math.max(0, Number(cap.fallbackAPIBaseline) || 0);
+	  const vidStart = Math.max(0, Number(cap.vidBaseline) || 0);
+	  const chunkStart = Math.max(0, Number(cap.chunkBaseline) || 0);
+	  if (Array.isArray(cap.fallbackApis)) cap.fallbackApis.slice(apiStart).forEach(addApi);
+	  if (Array.isArray(cap.vids)) cap.vids.slice(vidStart).forEach(addVid);
 	  if (Array.isArray(cap.chunks)) {
-	    for (const c of cap.chunks) scanText(c);
+	    for (const c of cap.chunks.slice(chunkStart)) scanText(c);
 	  }
-	  try { scanText(document.documentElement.innerHTML); } catch (_) {}
+	  // Do not scan the complete page HTML here. A reused conversation can contain
+	  // prior shots, and selecting its last old fallback_api saves the wrong video.
 	  return { apis, vids };
 	})()`
 	var out struct {
@@ -374,7 +378,7 @@ func (b *Browser) collectAllFallbackAPIs(ctx context.Context) (apis []string, vi
 	if err != nil {
 		log.Printf("generate_video: collect fallback_api: %v", err)
 	}
-	apis = uniqueStrings(append(pageApis, b.snapshotCapturedFallbackAPIs()...))
+	apis = uniqueStrings(pageApis)
 	vid = pageVid
 	return apis, vid
 }
