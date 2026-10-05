@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { api } from '@/api/client'
 import { useNovalyInject } from '@/composables/useNovalyInject'
 import type { AIModel, Provider, TextAPIFormat } from '@/types'
 import LocalDoubaoService from '@/components/LocalDoubaoService.vue'
@@ -49,6 +50,27 @@ const editingConnection = reactive<Record<number, boolean>>({})
 const providerDialogOpen = ref(false)
 const providerSaving = ref(false)
 const providerForm = reactive({ name: '', apiFormat: 'openai' as TextAPIFormat, baseUrl: '', apiKey: '', modelName: '', modelId: '' })
+const asr = reactive({ appId: '', token: '', cluster: 'volcengine_input_common', url: 'https://openspeech.bytedance.com/api/v1/vc/submit', configured: false, appIdMasked: '', tokenMasked: '' })
+const asrSaving = ref(false)
+
+async function loadASR() {
+  try { Object.assign(asr, await api('/settings/volc-asr')) } catch { /* optional integration */ }
+}
+
+async function saveASR(test = false) {
+  asrSaving.value = true
+  try {
+    Object.assign(asr, await api('/settings/volc-asr', { method: 'PUT', body: JSON.stringify(asr) }))
+    if (test) await api('/settings/volc-asr/test', { method: 'POST', body: '{}' })
+    asr.appId = ''
+    asr.token = ''
+    ElMessage.success(test ? '语音识别配置已保存' : '已保存')
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存语音识别配置失败')
+  } finally {
+    asrSaving.value = false
+  }
+}
 
 const apiFormatOptions = [
   { value: 'openai', label: 'OpenAI 兼容格式' },
@@ -246,6 +268,7 @@ async function resetDownloadDir() {
 
 onMounted(() => {
   if (downloadDirSupported) refreshDownloadDir()
+  void loadASR()
 })
 
 watch(settingsTab, tab => {
@@ -401,6 +424,26 @@ function onSetDefaultClick(model: AIModel) {
           <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer"><b>DeepSeek</b><span>注册/登录 → 充值 → 创建 API Key</span></a>
           <a href="https://www.doubao.com/" target="_blank" rel="noreferrer"><b>豆包 Web API</b><span>注册豆包账号；在本地服务打开的 Chrome 中登录</span></a>
         </div>
+
+        <el-card class="asr-card" shadow="never">
+          <template #header>
+            <div class="asr-head">
+              <div><b>火山引擎语音识别</b><small>全自动成片审核用来核对花括号中的对白</small></div>
+              <el-tag :type="asr.configured ? 'success' : 'warning'">{{ asr.configured ? '已配置' : '未配置' }}</el-tag>
+            </div>
+          </template>
+          <el-form label-position="top" class="asr-form">
+            <el-form-item label="App ID"><el-input v-model="asr.appId" :placeholder="asr.appIdMasked || '火山语音应用 App ID'" /></el-form-item>
+            <el-form-item label="Access Token"><el-input v-model="asr.token" type="password" show-password :placeholder="asr.tokenMasked || '火山语音 Access Token'" /></el-form-item>
+            <el-form-item label="Cluster"><el-input v-model="asr.cluster" /></el-form-item>
+            <el-form-item label="接口地址"><el-input v-model="asr.url" /></el-form-item>
+          </el-form>
+          <div class="asr-actions">
+            <a href="https://console.volcengine.com/speech/app" target="_blank" rel="noreferrer">注册并创建语音识别应用</a>
+            <el-button type="primary" :loading="asrSaving" @click="saveASR(true)">保存配置</el-button>
+          </div>
+          <p class="provider-hint">没有配置时，无对白镜头仍可自动生成；遇到含对白镜头会暂停并提示配置，不会误判为通过。</p>
+        </el-card>
 
         <div class="provider-grid">
           <article
@@ -618,6 +661,13 @@ function onSetDefaultClick(model: AIModel) {
 </template>
 
 <style scoped>
+.asr-card { margin: 16px 0 22px; background: rgba(255,255,255,.02); border-color: #3c3731; }
+.asr-head, .asr-actions { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.asr-head div { display: flex; flex-direction: column; gap: 4px; }
+.asr-head small { color: #9e958d; font-weight: normal; }
+.asr-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.asr-actions a { color: #ff8e72; }
+@media (max-width: 760px) { .asr-form { grid-template-columns: 1fr; } }
 .settings-header {
   display: flex;
   align-items: flex-start;

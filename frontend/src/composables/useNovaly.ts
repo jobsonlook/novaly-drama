@@ -45,6 +45,7 @@ import type {
   CrewAsset,
   CrewJob,
   CrewQCIssue,
+  AutoVideoRun,
 } from '@/types'
 
 const defaultStyle = '超真实历史战争电影质感，35mm 电影胶片颗粒，轻微暗角，低对比度胶片调色，4K 超高细节纹理，写实写真渲染，不二次元、不水墨插画，不是CG，不是游戏宣传片，不是概念艺术，纯真人影视实拍效果'
@@ -123,7 +124,7 @@ export function useNovaly() {
   const settingsTab = ref<'providers' | 'download' | 'trash'>('providers')
   let applyingRoute = false
   const studioTab = ref<'scripts' | 'episodes' | 'resources'>('scripts')
-  const resourceFilter = ref<'all' | 'character' | 'scene' | 'prop' | 'other' | 'video'>('all')
+  const resourceFilter = ref<'all' | 'missing-image' | 'character' | 'scene' | 'prop' | 'other' | 'video'>('all')
   const resourceQuery = ref('')
   const resourceLibraryTab = ref<'library' | 'trash'>('library')
   const resourceTrash = ref<Resource[]>([])
@@ -135,6 +136,8 @@ export function useNovaly() {
   let hydrateToken = 0
   const saving = ref(false)
   const generating = ref<number | null>(null)
+  const autoVideoRun = ref<AutoVideoRun | null>(null)
+  let autoVideoPollTimer: ReturnType<typeof setTimeout> | null = null
   const uploadingShot = ref<number | null>(null)
   const uploadingShotRef = ref<number | null>(null)
   const applyingShotVideo = ref<number | null>(null)
@@ -391,7 +394,7 @@ export function useNovaly() {
   const libraryTotal = ref(0)
   const libraryLoading = ref(false)
   const libraryReady = ref(false)
-  const libraryCounts = ref({ all: 0, character: 0, scene: 0, prop: 0, other: 0, video: 0 })
+  const libraryCounts = ref({ all: 0, missing: 0, character: 0, scene: 0, prop: 0, other: 0, video: 0 })
   const libraryParentId = ref<number | null>(null)
   const libraryParent = ref<Resource | null>(null)
   let libraryLoadToken = 0
@@ -427,6 +430,7 @@ export function useNovaly() {
       if (data?.counts && typeof data.counts === 'object') {
         libraryCounts.value = {
           all: Number(data.counts.all) || 0,
+          missing: Number(data.counts.missing) || 0,
           character: Number(data.counts.character) || 0,
           scene: Number(data.counts.scene) || 0,
           prop: Number(data.counts.prop) || 0,
@@ -463,7 +467,7 @@ export function useNovaly() {
     libraryTotal.value = 0
     libraryReady.value = false
     libraryLoading.value = false
-    libraryCounts.value = { all: 0, character: 0, scene: 0, prop: 0, other: 0, video: 0 }
+    libraryCounts.value = { all: 0, missing: 0, character: 0, scene: 0, prop: 0, other: 0, video: 0 }
     libraryParentId.value = null
     libraryParent.value = null
     resourcePage.value = 1
@@ -490,6 +494,9 @@ export function useNovaly() {
   )
   const resourceCounts = computed(() => ({
     all: libraryReady.value ? libraryCounts.value.all : topLevelLibraryResources.value.length,
+    missing: libraryReady.value
+      ? libraryCounts.value.missing
+      : topLevelLibraryResources.value.filter(r => r.type !== 'video' && !r.imageUrl && !r.stylizedImageUrl).length,
     character: libraryReady.value ? libraryCounts.value.character : topLevelLibraryResources.value.filter(r => r.type === 'character').length,
     scene: libraryReady.value ? libraryCounts.value.scene : topLevelLibraryResources.value.filter(r => r.type === 'scene').length,
     prop: libraryReady.value ? libraryCounts.value.prop : topLevelLibraryResources.value.filter(r => r.type === 'prop').length,
@@ -500,6 +507,9 @@ export function useNovaly() {
     if (libraryReady.value) return libraryPageItems.value
     let items = topLevelLibraryResources.value.filter(r => !parseCandidateName(r.name) || r.isGroupPrimary)
     if (resourceFilter.value === 'all') return items
+    if (resourceFilter.value === 'missing-image') {
+      return items.filter(r => r.type !== 'video' && !r.imageUrl && !r.stylizedImageUrl)
+    }
     return items.filter(r => r.type === resourceFilter.value)
   })
   const managedResourceDisplay = computed<ResourceDisplayEntry[]>(() =>
@@ -981,6 +991,7 @@ export function useNovaly() {
     } catch {
       // 分镜页仍正常打开；剧组状态稍后可由页面监听重新加载。
     }
+    void loadAutoVideoRun(true)
   }
 
   function shotEditSnapshot(shot: Shot): ShotEditSnapshot {
@@ -1190,6 +1201,7 @@ export function useNovaly() {
       void resumeImageGenerationJobs(id)
       syncShotGenPolls()
       void loadLibraryPage({ resetPage: true })
+      await loadAutoVideoRun(true)
     } catch (e) {
       if (token === hydrateToken) {
         projectHydrated.value = false
@@ -1433,8 +1445,8 @@ export function useNovaly() {
     const page = Math.min(shotPage.value, maxPage)
     await loadShotPage(page, { force: true })
   }
-  function shotUsesDoubaoWebAPI(shot: Shot): boolean {
-    const modelId = shot.videoModelId || defaultVideoModelId.value
+  function shotUsesDoubaoWebAPI(shot?: Shot | null): boolean {
+    const modelId = shot?.videoModelId || defaultVideoModelId.value
     if (!modelId) return false
     const model = videoModels.value.find(item => item.id === modelId)
     if (!model) return false
@@ -1442,7 +1454,21 @@ export function useNovaly() {
       provider.id === model.providerId && provider.slug === 'doubao-web-api',
     )
   }
-  async function ensureDoubaoWebAPIReady(shot: Shot): Promise<boolean> {
+  function promptDoubaoWebAPINotReady() {
+    askConfirm({
+      title: 'doubao-web-api 未启动',
+      message: '当前视频模型使用豆包网页 API。请先前往设置中心启动 doubao-web-api，等待状态显示“运行中”后再生成视频。',
+      confirmText: '前往设置中心',
+      onConfirm: () => openSettings('providers'),
+    })
+  }
+  function isDoubaoWebAPIDownMessage(message: string) {
+    return /doubao-web-api 未启动|无法连接豆包 Web API/.test(message || '')
+  }
+  async function ensureDoubaoWebAPIReady(shot?: Shot | null): Promise<boolean> {
+    if (!providers.value.length) {
+      try { await loadProviders() } catch { /* still probe local status below */ }
+    }
     if (!shotUsesDoubaoWebAPI(shot)) return true
     try {
       const status = await api('/local/doubao')
@@ -1450,12 +1476,7 @@ export function useNovaly() {
     } catch {
       // Show the same actionable prompt when the local status cannot be read.
     }
-    askConfirm({
-      title: 'doubao-web-api 未启动',
-      message: '当前视频模型使用豆包网页 API。请先前往设置中心启动 doubao-web-api，等待状态显示“运行中”后再生成视频。',
-      confirmText: '前往设置中心',
-      onConfirm: () => openSettings('providers'),
-    })
+    promptDoubaoWebAPINotReady()
     return false
   }
   async function generateShot(shot: Shot) {
@@ -1510,6 +1531,153 @@ export function useNovaly() {
       // Re-sync from server so a completed download isn't stuck as「生成中」after client timeout.
       await refreshShotFromServer(shot.id)
       notifyStudioSync({ type: 'shot', projectId: active.value?.id, shotId: shot.id, status: 'settled' })
+    }
+  }
+
+  function stopAutoVideoPoll() {
+    if (autoVideoPollTimer) clearTimeout(autoVideoPollTimer)
+    autoVideoPollTimer = null
+  }
+  let lastAutoVideoNotice = ''
+  async function focusAutoVideoCurrent(run?: AutoVideoRun | null) {
+    const target = run || autoVideoRun.value
+    if (!target?.currentShotId) return
+    const item = target.items?.find(i => i.shotId === target.currentShotId)
+    const sortOrder = item?.sortOrder
+    if (!sortOrder) return
+    const page = Math.floor(Math.max(0, sortOrder - 1) / shotPageSize) + 1
+    expandShot(target.currentShotId)
+    highlightedShotId.value = target.currentShotId
+    if (highlightShotTimer) clearTimeout(highlightShotTimer)
+    highlightShotTimer = setTimeout(() => {
+      if (highlightedShotId.value === target.currentShotId) highlightedShotId.value = 0
+    }, 4000)
+    if (shotPage.value !== page || !activeEpisode.value?.shots?.some(s => s.id === target.currentShotId)) {
+      await loadShotPage(page, { force: true })
+    }
+    await nextTick()
+    document.querySelector<HTMLElement>(`[data-shot-id="${target.currentShotId}"]`)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    })
+  }
+  function notifyAutoVideoRunChange(prevStatus: string | undefined, run: AutoVideoRun | null) {
+    if (!run) return
+    const item = run.items?.find(i => i.shotId === run.currentShotId)
+    let message = run.pauseReason || run.errorMessage || '任务已暂停，请查看分镜页原因'
+    if (run.status === 'paused' && item && item.status === 'pending' && !item.attempts) {
+      message = `已暂停在分镜 ${String(item.sortOrder).padStart(2, '0')}，这一镜还没开始生成。点「继续」接着做。`
+    }
+    const key = `${run.id}:${run.status}:${message}`
+    if (key === lastAutoVideoNotice) return
+    if (run.status === 'paused') {
+      lastAutoVideoNotice = key
+      ElNotification({
+        type: 'warning',
+        title: '全自动视频已暂停',
+        message,
+        duration: 0,
+      })
+      return
+    }
+    if (run.status === 'completed' && prevStatus && prevStatus !== 'completed') {
+      lastAutoVideoNotice = key
+      ElNotification({ type: 'success', title: '全自动视频已完成', message: `已通过 ${run.passedCount}/${run.totalCount} 镜`, duration: 8000 })
+    }
+  }
+  async function loadAutoVideoRun(schedule = false) {
+    if (!activeEpisode.value?.id) {
+      stopAutoVideoPoll()
+      if (schedule) {
+        autoVideoPollTimer = setTimeout(() => { void loadAutoVideoRun(true) }, 4000)
+      }
+      return
+    }
+    try {
+      const data = await api(`/episodes/${activeEpisode.value.id}/auto-video-run`)
+      const prevStatus = autoVideoRun.value?.status
+      autoVideoRun.value = data?.run || null
+      notifyAutoVideoRunChange(prevStatus, autoVideoRun.value)
+      if (autoVideoRun.value?.status === 'paused' && prevStatus !== 'paused') {
+        await focusAutoVideoCurrent(autoVideoRun.value)
+      }
+      const running = !!autoVideoRun.value && ['running', 'pause_requested'].includes(autoVideoRun.value.status)
+      if (running) {
+        void loadShotPage(shotPage.value, { force: true })
+      } else if (autoVideoRun.value?.status === 'paused' && prevStatus && prevStatus !== 'paused') {
+        void loadShotPage(shotPage.value, { force: true })
+      }
+      if (schedule) {
+        stopAutoVideoPoll()
+        const delay = running ? 3000 : 8000
+        autoVideoPollTimer = setTimeout(() => { void loadAutoVideoRun(true) }, delay)
+      } else if (!running) {
+        stopAutoVideoPoll()
+      }
+    } catch (e: any) {
+      if (!autoVideoRun.value) error.value = e.message || '读取全自动视频任务失败'
+      if (schedule) {
+        stopAutoVideoPoll()
+        autoVideoPollTimer = setTimeout(() => { void loadAutoVideoRun(true) }, 5000)
+      } else stopAutoVideoPoll()
+    }
+  }
+  async function startAutoVideoRun(shot: Shot) {
+    if (!shot.script.trim() || !shot.refs.length) { ElMessage.warning('请先填写分镜并添加参考图'); return }
+    if (!await ensureDoubaoWebAPIReady(shot)) return
+    try {
+      const data = await api(`/shots/${shot.id}/auto-video-runs`, { method: 'POST', body: '{}' })
+      autoVideoRun.value = data.run
+      error.value = ''
+      if (data.existing) ElMessage.success('已显示本集进行中的全自动视频任务')
+      else ElMessage.success(`已从「${shot.label}」开始全自动生成`)
+      void loadAutoVideoRun(true)
+    } catch (e: any) {
+      if (isDoubaoWebAPIDownMessage(e?.message)) {
+        promptDoubaoWebAPINotReady()
+        return
+      }
+      await loadAutoVideoRun(true)
+      if (autoVideoRun.value && ['running', 'pause_requested', 'paused'].includes(autoVideoRun.value.status)) {
+        error.value = ''
+        ElMessage.success('已显示本集进行中的全自动视频任务')
+        return
+      }
+      error.value = e.message
+      ElMessage.error(e.message)
+    }
+  }
+  async function autoVideoAction(action: 'pause' | 'resume' | 'cancel' | 'retry', body = '{}') {
+    if (!autoVideoRun.value) return
+    if (action === 'resume' || action === 'retry') {
+      const shot = activeEpisode.value?.shots.find(s => s.id === autoVideoRun.value?.currentShotId)
+      if (!await ensureDoubaoWebAPIReady(shot)) return
+    }
+    try {
+      const data = await api(`/auto-video-runs/${autoVideoRun.value.id}/${action}`, { method: 'POST', body })
+      autoVideoRun.value = data.run
+      if (action === 'resume' || action === 'retry') void loadAutoVideoRun(true)
+      else if (action === 'cancel') stopAutoVideoPoll()
+    } catch (e: any) {
+      if (isDoubaoWebAPIDownMessage(e?.message || '')) {
+        promptDoubaoWebAPINotReady()
+        return
+      }
+      error.value = e.message || '操作失败'
+      ElMessage.error(error.value)
+    }
+  }
+  async function acceptAutoVideoCandidate(resourceId?: number) {
+    if (!autoVideoRun.value) return
+    try {
+      const data = await api(`/auto-video-runs/${autoVideoRun.value.id}/accept`, { method: 'POST', body: JSON.stringify({ resourceId: resourceId || 0 }) })
+      autoVideoRun.value = data.run
+      error.value = ''
+      ElMessage.success('已人工采用当前版本，继续生成下一镜')
+      await loadShotPage(shotPage.value, { force: true })
+      void loadAutoVideoRun(true)
+    } catch (e: any) {
+      ElMessage.error(e?.message || '采用失败')
     }
   }
 
@@ -1629,9 +1797,34 @@ export function useNovaly() {
     return /^(比试)?擂台$|^演武[台场]$|^比武[台场]$|^演武$/.test(n)
   }
 
-  /** Suffixes that turn an entity name into a different place/attribute (小七→小七识海). */
+	/** Suffixes that turn an entity/place name into a different place (小七→小七识海, 祖师殿→祖师殿前). */
   const COMPOUND_PLACE_SUFFIX_RE =
-    /^(识海|识界|梦境|居所|内室|卧室|离场|长廊|走廊|侧廊|通道|回廊|府邸|洞府|秘境|空间|领域|世界|幻境|魂海|意识海)/u
+    /^(识海|识界|梦境|居所|内室|卧室|离场|长廊|走廊|侧廊|通道|回廊|府邸|洞府|秘境|空间|领域|世界|幻境|魂海|意识海|前|后|内|外|上|下|旁|侧)/u
+
+  function directionalPlaceTail(longer: string, shorter: string): string {
+    if (!longer || !shorter || longer === shorter || !longer.startsWith(shorter)) return ''
+    const tail = longer.slice(shorter.length)
+    return COMPOUND_PLACE_SUFFIX_RE.test(tail) ? tail : ''
+  }
+
+  function isDirectionalPlacePair(a: string, b: string): boolean {
+    return !!(directionalPlaceTail(a, b) || directionalPlaceTail(b, a))
+  }
+
+  /** Equivalent wording commonly used for explicitly counted child group assets. */
+  function characterGroupNameAliases(name: string): string[] {
+    const normalized = normalizeEntityName(name)
+    if (!/(?:孩童|孩子|儿童|小孩)/u.test(normalized)) return []
+    return [...new Set([
+      normalized,
+      normalized.replace(/孩童|儿童|小孩/gu, '孩子'),
+      normalized.replace(/孩子|儿童|小孩/gu, '孩童'),
+    ])]
+  }
+
+  function characterGroupCount(name: string): string {
+    return normalizeEntityName(name).match(/^([零一二三四五六七八九十百千万两\d]+)名?(?:孩童|孩子|儿童|小孩)/u)?.[1] || ''
+  }
 
   /**
    * Higher = better match. Blocks weak hits like 擂台 → 擂台离场长廊 when
@@ -1656,7 +1849,10 @@ export function useNovaly() {
       const h = normalizeEntityName(hint)
       if (!h) continue
       if (core === h || base === hint) best = Math.max(best, 1200 + core.length * 10)
-      else if (core.includes(h) || h.includes(core)) {
+      else if (isDirectionalPlacePair(core, h)) {
+        // 祖师殿 ≠ 祖师殿前；只有文案写全称才算
+        continue
+      } else if (core.includes(h) || h.includes(core)) {
         // Avoid 擂台 ⊂ 擂台离场长廊 via short scene-token alone
         const ratio = Math.min(core.length, h.length) / Math.max(core.length, h.length)
         if (ratio >= 0.5) best = Math.max(best, 1000 + Math.min(core.length, h.length) * 10)
@@ -1668,6 +1864,17 @@ export function useNovaly() {
     // Full resource name appears in text
     if (haystack.includes(base) || haystack.includes(core)) {
       best = Math.max(best, 900 + core.length * 10)
+    }
+    // 群像资源常叫「六名孩童」，分镜则写「六名孩子」。明确人数相同即为强匹配。
+    for (const alias of characterGroupNameAliases(base)) {
+      if (alias.length >= 3 && haystack.includes(alias)) {
+        best = Math.max(best, 930 + alias.length * 10)
+      }
+    }
+    const groupCount = characterGroupCount(base)
+    if (groupCount) {
+      const flexibleGroup = new RegExp(`${groupCount}名?[^，。；;\\n]{0,12}(?:孩童|孩子|儿童|小孩)`, 'u')
+      if (flexibleGroup.test(haystack)) best = Math.max(best, 925 + core.length * 10)
     }
     // Stem match: 「5米长的赤鳞蜈蚣」↔ 文案「赤鳞蜈蚣」；「拳头大小的小七」↔「小七」
     const stem = entityStem(base)
@@ -1831,17 +2038,23 @@ export function useNovaly() {
       const core = normalizeEntityName(base)
       const stem = entityStem(base)
       if (core.length < 2 && stem.length < 2) return false
-      if (haystack.includes(base) || haystack.includes(core) || (stem.length >= 2 && haystack.includes(stem))) return true
+      if (haystack.includes(base) || haystack.includes(core)) return true
+      if (stem.length >= 2 && stem !== core && haystack.includes(stem)) return true
       for (const hint of sceneHints) {
         const h = normalizeEntityName(hint)
-        if (h && (core.includes(h) || h.includes(core) || core === h || stem === h || stem.includes(h) || h.includes(stem))) return true
+        if (!h) continue
+        if (core === h || stem === h) return true
+        if (isDirectionalPlacePair(core, h) || isDirectionalPlacePair(stem, h)) continue
+        if (core.includes(h) || h.includes(core) || stem.includes(h) || h.includes(stem)) return true
       }
       for (const mention of mentions) {
         if (mention.length < 2) continue
         const m = normalizeEntityName(mention)
         const ms = entityStem(mention)
         if (m.length < 2 && ms.length < 2) continue
-        if (core === m || stem === m || stem === ms || core.includes(m) || m.includes(core)
+        if (core === m || stem === m || stem === ms) return true
+        if (isDirectionalPlacePair(core, m) || isDirectionalPlacePair(stem, m) || isDirectionalPlacePair(core, ms)) continue
+        if (core.includes(m) || m.includes(core)
           || (stem.length >= 2 && (stem.includes(ms) || ms.includes(stem)))) {
           return true
         }
@@ -3648,7 +3861,7 @@ export function useNovaly() {
   function defaultResourceFormType(): 'character' | 'scene' | 'prop' | 'video' {
     const parentType = libraryParent.value?.type
     if (parentType === 'character' || parentType === 'scene' || parentType === 'prop') return parentType
-    if (resourceFilter.value === 'all' || resourceFilter.value === 'other') return 'character'
+    if (resourceFilter.value === 'all' || resourceFilter.value === 'other' || resourceFilter.value === 'missing-image') return 'character'
     return resourceFilter.value
   }
   function toggleAddResourceForm() {
@@ -5269,14 +5482,18 @@ export function useNovaly() {
     const hasRunningImageJobs = imageGenJobs.value.some(
       j => j.projectId === projectId && (j.status === 'pending' || j.status === 'running'),
     )
+    const autoVideoBusy = ['running', 'pause_requested'].includes(autoVideoRun.value?.status || '')
     // Quiet interval: skip full episode replace while user is editing,
     // or when nothing is generating (shot/job polls already cover active work).
     if (reason === 'interval') {
+      if (studioTab.value === 'episodes') {
+        void loadAutoVideoRun(true)
+      }
       if (dirtyShotIds.value.size > 0) {
         await syncImageGenerationJobs(projectId, { focusRunning: false }).catch(() => {})
         return
       }
-      if (!hasGeneratingShots && !hasRunningImageJobs) return
+      if (!hasGeneratingShots && !hasRunningImageJobs && !autoVideoBusy) return
     }
 
     studioSyncInFlight = true
@@ -5287,6 +5504,7 @@ export function useNovaly() {
       }
       if (reason === 'visibility' || reason === 'broadcast') {
         await refreshProjectResources().catch(() => {})
+        await loadAutoVideoRun(true).catch(() => {})
       }
     } finally {
       studioSyncInFlight = false
@@ -5311,7 +5529,12 @@ export function useNovaly() {
 
   function onStudioVisibilityChange() {
     if (document.visibilityState !== 'visible' || !active.value) return
+    void loadAutoVideoRun(true)
     void syncActiveStudioFromServer('visibility')
+  }
+
+  function onStudioPageShow(ev: PageTransitionEvent) {
+    if (ev.persisted) void onStudioVisibilityChange()
   }
 
   function onStudioSyncMessage(ev: MessageEvent) {
@@ -10747,12 +10970,20 @@ ${descBlock}${legendBlock}
     void loadShotPage(page, { force: true })
   })
   watch(() => activeEpisode.value?.id, (id, prev) => {
-    if (prev == null || id == null || id === prev) return
-    clearAllShotDirty()
-    suppressShotPageWatch = true
-    shotPage.value = 1
-    suppressShotPageWatch = false
-    void loadShotPage(1, { force: true })
+    if (id == null) {
+      stopAutoVideoPoll()
+      return
+    }
+    if (id === prev) return
+    // First select (prev == null) is owned by hydrateProject — don't snap ?page= back to 1.
+    if (prev != null) {
+      clearAllShotDirty()
+      suppressShotPageWatch = true
+      shotPage.value = 1
+      suppressShotPageWatch = false
+      void loadShotPage(1, { force: true })
+    }
+    void loadAutoVideoRun(true)
   })
 
   watch(() => (activeEpisode.value?.shots || []).map(s => `${s.id}:${s.status}`).join('|'), () => {
@@ -10763,15 +10994,19 @@ ${descBlock}${legendBlock}
     loadProviders()
     await load()
     await applyRoute()
+    await loadAutoVideoRun(true)
     syncShotGenPolls()
     startStudioSyncLoop()
     document.addEventListener('visibilitychange', onStudioVisibilityChange)
+    window.addEventListener('pageshow', onStudioPageShow)
     studioSyncChannel?.addEventListener('message', onStudioSyncMessage)
   })
 
   onUnmounted(() => {
+	stopAutoVideoPoll()
     stopStudioSyncLoop()
     document.removeEventListener('visibilitychange', onStudioVisibilityChange)
+    window.removeEventListener('pageshow', onStudioPageShow)
     studioSyncChannel?.removeEventListener('message', onStudioSyncMessage)
     try { studioSyncChannel?.close() } catch { /* ignore */ }
     stopCrewPoll()
@@ -11400,6 +11635,12 @@ ${descBlock}${legendBlock}
     providersLoading,
     saving,
     generating,
+    autoVideoRun,
+    loadAutoVideoRun,
+    focusAutoVideoCurrent,
+    startAutoVideoRun,
+    autoVideoAction,
+    acceptAutoVideoCandidate,
     uploadingShot,
     uploadingShotRef,
     applyingShotVideo,

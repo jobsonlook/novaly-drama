@@ -19,6 +19,8 @@ func TestResourceQueryMatchesDerivativeAliases(t *testing.T) {
 		{"韩铮", "", "韩铮", true},
 		{"韩铮", "", "赤膊战损", false},
 		{"阿彪", "", "韩铮", false},
+		{"归元宗祖师殿前", "", "归元宗祖师殿", false},
+		{"归元宗祖师殿", "", "归元宗祖师殿", true},
 	}
 	for _, tc := range cases {
 		if got := ResourceQueryMatches(tc.name, tc.parent, tc.query); got != tc.want {
@@ -101,5 +103,35 @@ func TestBuildVideoPromptToonflowIdentity(t *testing.T) {
 	}
 	if !strings.Contains(got, "配饰锁定") || !strings.Contains(got, "参考图没有奖牌") {
 		t.Fatalf("missing accessory lock:\n%s", got)
+	}
+}
+
+func TestAreDistinctDirectionalPlaces(t *testing.T) {
+	if !AreDistinctDirectionalPlaces("归元宗祖师殿", "归元宗祖师殿前") {
+		t.Fatal("殿 vs 殿前")
+	}
+	if !AreDistinctDirectionalPlaces("归墟断桥下", "归墟断桥") {
+		t.Fatal("断桥下 vs 断桥")
+	}
+	if !AreDistinctDirectionalPlaces("归墟龙心殿外", "归墟龙心殿") {
+		t.Fatal("殿外 vs 殿")
+	}
+	if AreDistinctDirectionalPlaces("归元宗祖师殿", "归元宗祖师殿") {
+		t.Fatal("same name")
+	}
+	if AreDistinctDirectionalPlaces("唐小满", "谢无尘") {
+		t.Fatal("unrelated names")
+	}
+}
+
+func TestSceneGridTitleMatchesScene(t *testing.T) {
+	if !SceneGridTitleMatchesScene("归元宗祖师殿", "归元宗祖师殿") {
+		t.Fatal("exact plate")
+	}
+	if SceneGridTitleMatchesScene("归元宗祖师殿前", "归元宗祖师殿") {
+		t.Fatal("plaza grid must not match interior name")
+	}
+	if SceneGridTitleMatchesScene("", "归元宗祖师殿") {
+		t.Fatal("empty base")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeVideoDurationSec(t *testing.T) {
@@ -224,6 +225,8 @@ func TestTextNeedsVideoConfirm(t *testing.T) {
 		{"请确认以下视频生成参数：时长 15 秒。确认后我再开始生成。", true},
 		{"我先为你整理好视频生成参数，请确认后我再开始生成：", true},
 		{"确认无误后请回复 '确认' 或 '开始生成'，我将输出分镜表", true},
+		{"已按参考图整理如下。\n分镜表\n0–3 秒：镜头缓推\n3–7 秒：人物开口", true},
+		{"视频生成参数\n模型：Seedance 2.0 Mini\n时长：10 秒", true},
 		{"视频正在生成中，大约需要 1-3 分钟", false},
 		{"本次使用 Seedance 2.0 Fast 生成，大约需要 1-3 分钟。视频生成好后，我会主动发送给你。", false},
 		{"请确认以下视频生成参数。本次使用 Seedance，大约需要 1-3 分钟。", false},
@@ -301,6 +304,36 @@ func TestTextIndicatesVideoGeneratingIgnoresETAWhenCompletePresent(t *testing.T)
 	etaOnly := "本次使用 Seedance 2.0 Fast 生成，预计等待 20 分钟。视频生成好后，我会主动发送给你。本次生成将消耗每日免费额度。"
 	if !textIndicatesVideoGenerating(etaOnly) {
 		t.Fatal("ETA-only ack should still look generating")
+	}
+}
+
+func TestVideoCaptureGateFor(t *testing.T) {
+	cases := []struct {
+		name       string
+		complete   bool
+		pending    bool
+		elapsed    time.Duration
+		etaMinutes int
+		accept     bool
+		recover    bool
+	}{
+		{"early pending waits", false, true, 30 * time.Second, 15, false, false},
+		{"pending after 90s accepts url", false, true, 2 * time.Minute, 15, true, false},
+		{"pending before quoted eta no reload", false, true, 10 * time.Minute, 15, true, false},
+		{"pending past quoted eta reloads", false, true, 17 * time.Minute, 15, true, true},
+		{"stuck spa without cues reloads at 3min", false, false, 3 * time.Minute, 0, true, true},
+		{"complete immediately recovers", true, false, 10 * time.Second, 15, true, true},
+		{"complete after 2min still recovers", true, false, 2 * time.Minute, 15, true, true},
+		{"no eta default reload at 16min", false, true, 16 * time.Minute, 0, true, true},
+		{"short eta still waits 5min", false, true, 4 * time.Minute, 1, true, false},
+		{"short eta reloads at 5min", false, true, 5 * time.Minute, 1, true, true},
+	}
+	for _, tc := range cases {
+		got := videoCaptureGateFor(tc.complete, tc.pending, tc.elapsed, tc.etaMinutes)
+		if got.AcceptFresh != tc.accept || got.Recover != tc.recover {
+			t.Fatalf("%s: accept=%v recover=%v want accept=%v recover=%v",
+				tc.name, got.AcceptFresh, got.Recover, tc.accept, tc.recover)
+		}
 	}
 }
 

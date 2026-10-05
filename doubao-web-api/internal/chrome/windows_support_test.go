@@ -42,6 +42,28 @@ func TestWindowsChromeCommandKeepsSpacedPaths(t *testing.T) {
 	if !found {
 		t.Fatal(cmd.Args)
 	}
+	ext := filepath.Join(root, "chrome-extension")
+	if err := os.MkdirAll(ext, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ext, "manifest.json"), []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(extensionEnv, ext)
+	cmd, err = windowsChromeCommand(session, 9322)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLoad := "--load-extension=" + ext
+	foundLoad := false
+	for _, arg := range cmd.Args {
+		if arg == wantLoad {
+			foundLoad = true
+		}
+	}
+	if !foundLoad {
+		t.Fatal(cmd.Args)
+	}
 	if st, err := os.Stat(session); err != nil || !st.IsDir() {
 		t.Fatal("profile directory was not created")
 	}

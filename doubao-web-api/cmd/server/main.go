@@ -142,8 +142,9 @@ func main() {
 		// multipart uploads (Novaly ref images can be multi‑MB each).
 		ReadHeaderTimeout: 15 * time.Second,
 		ReadTimeout:       10 * time.Minute,
-		WriteTimeout:      cfg.RequestTimeout + 30*time.Second,
-		IdleTimeout:       120 * time.Second,
+		// Video proxy buffers a full MP4 from Douyin CDN before writing; 90s–3min is common.
+		WriteTimeout: 15 * time.Minute,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {

@@ -715,6 +715,9 @@ async function runAiGenerate() {
         <el-button text :class="{ on: resourceFilter === 'all' }" @click="resourceFilter = 'all'">
           全部 <span class="filter-count">{{ resourceCounts.all }}</span>
         </el-button>
+        <el-button text :class="{ on: resourceFilter === 'missing-image' }" @click="resourceFilter = 'missing-image'">
+          未生成图片 <span class="filter-count">{{ resourceCounts.missing }}</span>
+        </el-button>
         <el-button text :class="{ on: resourceFilter === 'character' }" @click="resourceFilter = 'character'">
           角色 <span class="filter-count">{{ resourceCounts.character }}</span>
         </el-button>
@@ -1465,7 +1468,9 @@ async function runAiGenerate() {
               ? '没有匹配的资源'
               : (resourceFilter === 'all'
                 ? '还没有任何资源。可点击「添加资源」上传或生成，分镜视频生成后也会自动归档。'
-                : `暂无${resourceTypeLabel(resourceFilter)}资源`)
+                : resourceFilter === 'missing-image'
+                  ? '所有图片资源都已生成'
+                  : `暂无${resourceTypeLabel(resourceFilter)}资源`)
         }}
       </p>
       <div v-if="libraryTotal > resourcePageSize" class="resource-pagination">

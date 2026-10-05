@@ -87,6 +87,10 @@ func videoPromptPrefix(durationSec int) string {
 
 var (
 	reVideoConfirmPending = regexp.MustCompile(`请确认以下视频生成参数|请核对以下视频生成参数|确认后我再开始生成|请确认后我再开始生成|确认参数后生成视频|确认以下.*参数|核对以下.*参数|确认无误后请回复|整理好视频生成参数|请确认后.*开始生成`)
+	// Newer Doubao responses sometimes omit an explicit confirmation sentence
+	// and only return a proposal headed 「分镜表」. In a video-generation API
+	// request this is still a confirmation gate, not a generation acknowledgement.
+	reVideoPlanOnly = regexp.MustCompile(`分镜表|视频生成参数(?:确认)?`)
 	// Doubao ack copy drifts: older ETA banners plus newer short lines like
 	// 「收到，即将为您生成视频。」
 	// 「正在为您生成10秒的仙侠玄幻视频」— 「生成」与「视频」之间常夹时长/题材。
@@ -102,7 +106,7 @@ func textNeedsVideoConfirm(text string) bool {
 		// Already generating / finished — never treat as "please confirm params".
 		return false
 	}
-	return reVideoConfirmPending.MatchString(text)
+	return reVideoConfirmPending.MatchString(text) || reVideoPlanOnly.MatchString(text)
 }
 
 func textIndicatesVideoGenerating(text string) bool {
@@ -3612,6 +3616,54 @@ func videoGenerationComplete(ctx context.Context) bool {
 	return false
 }
 
+type videoCaptureGate struct {
+	AcceptFresh bool
+	Recover     bool
+}
+
+// videoCaptureGateFor decides when a newly extracted video URL may be kept, and
+// when the Doubao SPA should be recovered (player / download / conversation reload).
+//
+// The chat often keeps 「预计等待 / 本次使用」on screen after Seedance finishes, and
+// sometimes never paints 「你的视频生成好了」until a human refreshes. Treat a fresh
+// playable URL (diffed against the submit baseline) as completion after 90s, and
+// soft-reload the pinned conversation once the quoted ETA has elapsed.
+func videoCaptureGateFor(complete, pending bool, elapsed time.Duration, etaMinutes int) videoCaptureGate {
+	const staleGuard = 90 * time.Second
+	const stuckSPAReloadAfter = 3 * time.Minute
+	const defaultETARecoverAfter = 16 * time.Minute
+
+	if complete {
+		// 「你的视频生成好了」is the capture signal. Sleep/wake often leaves the
+		// player on screen without a CDN URL until we click it / 无水印下载.
+		return videoCaptureGate{AcceptFresh: true, Recover: true}
+	}
+	if pending && elapsed < staleGuard {
+		return videoCaptureGate{}
+	}
+
+	g := videoCaptureGate{}
+	if elapsed >= staleGuard {
+		g.AcceptFresh = true
+	}
+
+	recoverAfter := defaultETARecoverAfter
+	if etaMinutes > 0 {
+		recoverAfter = time.Duration(etaMinutes)*time.Minute + 90*time.Second
+		if recoverAfter < 5*time.Minute {
+			recoverAfter = 5 * time.Minute
+		}
+	}
+	if !pending && elapsed >= stuckSPAReloadAfter && recoverAfter > stuckSPAReloadAfter {
+		recoverAfter = stuckSPAReloadAfter
+	}
+	if elapsed >= recoverAfter {
+		g.Recover = true
+		g.AcceptFresh = true
+	}
+	return g
+}
+
 func tryActivateVideoPlayer(ctx context.Context) bool {
 	var pt clickPoint
 	const js = `(() => {
@@ -3683,7 +3735,7 @@ func tryActivateVideoPlayer(ctx context.Context) bool {
 		return false
 	}
 	log.Printf("generate_video: click video cover to load player at (%.0f, %.0f)", pt.X, pt.Y)
-	if err := chromedp.Run(ctx,
+	if err := runWithTimeout(ctx, 8*time.Second,
 		chromedp.MouseClickXY(pt.X, pt.Y, chromedp.ButtonLeft),
 		chromedp.Sleep(2*time.Second),
 	); err != nil {
@@ -3702,10 +3754,12 @@ func tryClickVideoDownload(ctx context.Context) bool {
 		function score(el, label) {
 			const r = el.getBoundingClientRect();
 			if (r.width < 12 || r.height < 12) return -1;
-			if (r.top < 40 || r.top > vh - 80) return -1;
+			if (r.top < 40) return -1;
+			if (r.top > vh - 80 && label !== '无水印下载') return -1;
 			// Prefer controls near the main canvas / message video, not sidebar.
 			if (r.right < vw * 0.28) return -1;
 			let s = 50;
+			if (label === '无水印下载') s += 100;
 			if (label === '下载' || label === '下载视频') s += 80;
 			if (/download/i.test(el.getAttribute('aria-label') || '') ||
 				/download/i.test(el.getAttribute('title') || '')) s += 70;
@@ -3719,9 +3773,10 @@ func tryClickVideoDownload(ctx context.Context) bool {
 			const text = (el.textContent || '').trim().replace(/\s+/g, ' ');
 			const label = text.length <= 8 ? text : '';
 			const looksDownload = label === '下载' || label === '下载视频' ||
-				/^下载/.test(label) || /download/i.test(aria);
+				/^下载/.test(label) || /download/i.test(aria) ||
+				/无水印下载/.test(text) || /无水印下载/.test(aria);
 			if (!looksDownload) continue;
-			const s = score(el, label || 'download');
+			const s = score(el, /无水印/.test(text + aria) ? '无水印下载' : (label || 'download'));
 			if (s < 40) continue;
 			const r = el.getBoundingClientRect();
 			candidates.push({ s, x: r.left + r.width / 2, y: r.top + r.height / 2, text: label || aria.slice(0, 24) });
@@ -3735,7 +3790,7 @@ func tryClickVideoDownload(ctx context.Context) bool {
 		return false
 	}
 	log.Printf("generate_video: click download control %q at (%.0f, %.0f)", pt.Text, pt.X, pt.Y)
-	if err := chromedp.Run(ctx,
+	if err := runWithTimeout(ctx, 8*time.Second,
 		chromedp.MouseClickXY(pt.X, pt.Y, chromedp.ButtonLeft),
 		chromedp.Sleep(2*time.Second),
 	); err != nil {
@@ -3750,7 +3805,9 @@ type videoURLRecoverState struct {
 	ChainReloaded   bool
 	LastDiagAt      time.Time
 	LastPlayerAt    time.Time
+	LastDownloadAt  time.Time
 	LastFallbackAt  time.Time
+	LastReloadAt    time.Time
 }
 
 func logVideoExtractDiagnostics(ctx context.Context, where string, cdpCount int) {
@@ -3977,38 +4034,36 @@ func confirmAcceptedAfterReply(ctx context.Context, beforeCount int) bool {
 }
 
 func confirmViaChatReply(ctx context.Context, beforeCount int) (bool, error) {
-	for _, reply := range []string{"确认", "开始生成"} {
-		if _, err := waitForHumanVerification(ctx); err != nil {
+	// Doubao's video skill treats this exact short command as the action that
+	// invokes generation. A longer acknowledgement may only produce a chat reply
+	// such as「正在渲染」without actually starting the video tool.
+	const reply = "开始生成"
+	if _, err := waitForHumanVerification(ctx); err != nil {
+		return false, err
+	}
+	if err := focusChatEditor(ctx); err != nil {
+		return false, err
+	}
+	if err := typeIntoFocused(ctx, reply); err != nil {
+		return false, err
+	}
+	if err := chromedp.Run(ctx, chromedp.Sleep(400*time.Millisecond)); err != nil {
+		return false, err
+	}
+	submitBefore := beforeCount
+	if n, err := readSubmitCount(ctx); err == nil {
+		submitBefore = n
+	}
+	if err := trySubmitUI(ctx, submitBefore); err != nil {
+		log.Printf("generate_video: confirm chat submit (%q): %v (try keyboard)", reply, err)
+		if err := keyboardSubmit(ctx); err != nil {
 			return false, err
-		}
-		if err := focusChatEditor(ctx); err != nil {
-			return false, err
-		}
-		if err := typeIntoFocused(ctx, reply); err != nil {
-			return false, err
-		}
-		if err := chromedp.Run(ctx, chromedp.Sleep(400*time.Millisecond)); err != nil {
-			return false, err
-		}
-		submitBefore := beforeCount
-		if n, err := readSubmitCount(ctx); err == nil {
-			submitBefore = n
-		}
-		if err := trySubmitUI(ctx, submitBefore); err != nil {
-			log.Printf("generate_video: confirm chat submit (%q): %v (try keyboard)", reply, err)
-			if err := keyboardSubmit(ctx); err != nil {
-				return false, err
-			}
-		}
-		if err := chromedp.Run(ctx, chromedp.Sleep(1500*time.Millisecond)); err != nil {
-			return false, err
-		}
-		if confirmAcceptedAfterReply(ctx, beforeCount) {
-			log.Printf("generate_video: confirmed via chat reply %q", reply)
-			return true, nil
 		}
 	}
-	return false, nil
+	// A successful submit is an irreversible confirmation action. Do not send a
+	// second reply merely because Doubao's page has not rendered its ack yet.
+	log.Printf("generate_video: confirmation reply %q submitted", reply)
+	return true, nil
 }
 
 func tryConfirmVideoGeneration(ctx context.Context, beforeCount int) (bool, error) {
@@ -4026,12 +4081,10 @@ func tryConfirmVideoGeneration(ctx context.Context, beforeCount int) (bool, erro
 			log.Printf("generate_video: click 生成视频 action: %v", err)
 			return false, nil
 		}
-		if !videoGenerateActionButtonPending(ctx) || confirmAcceptedAfterReply(ctx, beforeCount) {
-			log.Printf("generate_video: confirmed via in-message 生成视频 button")
-			return true, nil
-		}
-		// Do NOT fall through to typing 「确认」— that spams other chats.
-		return false, nil
+		// The click itself may start a paid/quota-consuming task. Treat it as sent
+		// even when the React card updates slowly, so polling cannot click again.
+		log.Printf("generate_video: clicked in-message 生成视频 button")
+		return true, nil
 	}
 
 	var latest string
@@ -4497,6 +4550,15 @@ func (b *Browser) GenerateVideoViaUI(ctx context.Context, opts VideoUIOptions) (
 	if err := waitForManualVerification(); err != nil {
 		return nil, err
 	}
+	if harvested := b.harvestCompletedVideoOnPage(runCtx); len(harvested) > 0 {
+		best := pickLatestVideoItem(harvested)
+		log.Printf("generate_video: harvested already-completed video (%s)", shortVideoURL(best.VideoURL))
+		best = b.UpgradeVideoToUnwatermarked(runCtx, best)
+		if err := resetToFreshChat(runCtx); err != nil {
+			log.Printf("generate_video: post-harvest fresh chat: %v", err)
+		}
+		return []VideoItem{best}, nil
+	}
 	if err := ensureNewSession(runCtx, officeMode); err != nil {
 		return nil, fmt.Errorf("new session: %w", err)
 	}
@@ -4695,6 +4757,10 @@ func (b *Browser) GenerateVideoViaUI(ctx context.Context, opts VideoUIOptions) (
 	if err := focusChatEditor(runCtx); err != nil {
 		log.Printf("generate_video: re-focus editor before submit: %v", err)
 	}
+	// The browser-level Network.getResponseBody cache survives navigation. Clear
+	// it immediately before this task is submitted so subsequent fallback_api
+	// entries belong to this video and cannot resolve to a previous shot.
+	b.clearCapturedFallbackAPIs()
 	if err := trySubmitUI(runCtx, beforeCount); err != nil {
 		return nil, fmt.Errorf("ui submit: %w", err)
 	}
@@ -4731,7 +4797,8 @@ func (b *Browser) GenerateVideoViaUI(ctx context.Context, opts VideoUIOptions) (
 	}
 	reportETA()
 
-	if waitAndConfirmVideoGeneration(runCtx, beforeCount, 25*time.Second) {
+	confirmationSent := waitAndConfirmVideoGeneration(runCtx, beforeCount, 25*time.Second)
+	if confirmationSent {
 		if err := chromedp.Run(runCtx, chromedp.Sleep(1500*time.Millisecond)); err != nil {
 			return nil, err
 		}
@@ -4760,9 +4827,10 @@ func (b *Browser) GenerateVideoViaUI(ctx context.Context, opts VideoUIOptions) (
 	}
 
 	deadline := time.Now().Add(timeout)
-	confirmAttempted := false
+	confirmAttempted := confirmationSent
 	var recover videoURLRecoverState
 	var lastPendingLog time.Time
+	cdpFails := 0
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
@@ -4780,7 +4848,7 @@ func (b *Browser) GenerateVideoViaUI(ctx context.Context, opts VideoUIOptions) (
 			if cur := currentChatConversationID(runCtx); cur != "" && cur != jobConvID {
 				log.Printf("generate_video: left job conversation %s -> %s, navigating back", jobConvID, cur)
 				targetURL := fmt.Sprintf("%s/chat/%s", doubaoBaseURL, jobConvID)
-				if err := chromedp.Run(runCtx,
+				if err := runWithTimeout(runCtx, 15*time.Second,
 					chromedp.Navigate(targetURL),
 					chromedp.Sleep(800*time.Millisecond),
 				); err != nil {
@@ -4803,20 +4871,33 @@ func (b *Browser) GenerateVideoViaUI(ctx context.Context, opts VideoUIOptions) (
 		if videoGenerationConfirmPending(runCtx) && !confirmAttempted {
 			log.Printf("generate_video: parameter confirmation pending, auto-replying...")
 			confirmCount, _ := readSubmitCount(runCtx)
-			if ok, _ := tryConfirmVideoGeneration(runCtx, confirmCount); ok {
-				confirmAttempted = true
+			// Lock before attempting. A successful click/submit can consume quota
+			// before the page exposes an acknowledgement, so it must never retry.
+			confirmAttempted = true
+			if ok, err := tryConfirmVideoGeneration(runCtx, confirmCount); ok {
 				log.Printf("generate_video: confirmation sent, waiting for generation to start")
 				select {
 				case <-ctx.Done():
 					return nil, ctx.Err()
 				case <-time.After(2 * time.Second):
 				}
-			} else if videoGenerationAcknowledged(runCtx) {
-				confirmAttempted = true
+			} else if err != nil {
+				log.Printf("generate_video: confirmation attempt failed: %v", err)
 			}
 		}
 
-		if items, err := b.pollUIVideoResults(runCtx, baseline, &recover, submittedAt); err == nil && len(items) > 0 {
+		if items, err := b.pollUIVideoResults(runCtx, baseline, &recover, submittedAt, jobConvID); err != nil {
+			cdpFails++
+			log.Printf("generate_video: poll extract failed (%d): %v", cdpFails, err)
+			if cdpFails >= 2 && jobConvID != "" {
+				log.Printf("generate_video: CDP stalled, soft-reloading conversation %s", jobConvID)
+				if reloadErr := b.softReloadVideoConversation(runCtx, jobConvID); reloadErr != nil {
+					log.Printf("generate_video: soft-reload after CDP stall: %v", reloadErr)
+				}
+				cdpFails = 0
+			}
+		} else if len(items) > 0 {
+			cdpFails = 0
 			best := pickLatestVideoItem(items)
 			log.Printf("generate_video: got completed video url (%s)", shortVideoURL(best.VideoURL))
 			// Resolve fallback_api → logo_type=unwatermarked before leaving the chat,
@@ -4858,7 +4939,53 @@ func (b *Browser) GenerateVideoViaUI(ctx context.Context, opts VideoUIOptions) (
 	return nil, fmt.Errorf("video UI mode timed out — check Chrome tab for errors or rate limit")
 }
 
-func (b *Browser) pollUIVideoResults(ctx context.Context, baseline map[string]struct{}, recover *videoURLRecoverState, submittedAt time.Time) ([]VideoItem, error) {
+func (b *Browser) harvestCompletedVideoOnPage(ctx context.Context) []VideoItem {
+	if !videoGenerationComplete(ctx) {
+		return nil
+	}
+	var recover videoURLRecoverState
+	jobConvID := currentChatConversationID(ctx)
+	for i := 0; i < 4; i++ {
+		items, err := b.pollUIVideoResults(ctx, map[string]struct{}{}, &recover, time.Time{}, jobConvID)
+		if err != nil {
+			log.Printf("generate_video: harvest completed video: %v", err)
+			return nil
+		}
+		if len(items) > 0 {
+			return items
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(2 * time.Second):
+		}
+	}
+	return nil
+}
+
+func (b *Browser) softReloadVideoConversation(ctx context.Context, convID string) error {
+	if strings.TrimSpace(convID) == "" {
+		convID = currentChatConversationID(ctx)
+	}
+	if convID == "" {
+		return fmt.Errorf("empty conversation id")
+	}
+	log.Printf("generate_video: soft-reload conversation %s to capture fallback_api", convID)
+	targetURL := fmt.Sprintf("%s/chat/%s", doubaoBaseURL, convID)
+	if err := runWithTimeout(ctx, 20*time.Second,
+		chromedp.Navigate(targetURL),
+		chromedp.Sleep(4*time.Second),
+	); err != nil {
+		log.Printf("generate_video: soft-reload navigate: %v", err)
+		return err
+	}
+	_ = installVideoCaptureHook(ctx)
+	_ = dismissDoubaoPopups(ctx)
+	b.harvestChainSingleBodies(ctx)
+	return nil
+}
+
+func (b *Browser) pollUIVideoResults(ctx context.Context, baseline map[string]struct{}, recover *videoURLRecoverState, submittedAt time.Time, jobConvID string) ([]VideoItem, error) {
 	type pollResult struct {
 		Videos []VideoItem `json:"videos"`
 		Chunks []string    `json:"chunks"`
@@ -4874,9 +5001,16 @@ func (b *Browser) pollUIVideoResults(ctx context.Context, baseline map[string]st
 	}
 	complete := videoGenerationComplete(ctx)
 	pending := videoGenerationPending(ctx, submittedAt)
-	// Stale ETA ack can look "pending" while the page already shows completion.
-	// Prefer completion so we enter URL recovery instead of spinning forever.
-	if pending && !complete {
+	elapsed := time.Duration(0)
+	if !submittedAt.IsZero() {
+		elapsed = time.Since(submittedAt)
+	}
+	etaMinutes := 0
+	if eta, ok := readVideoETA(ctx); ok {
+		etaMinutes = eta.Minutes
+	}
+	gate := videoCaptureGateFor(complete, pending, elapsed, etaMinutes)
+	if !gate.AcceptFresh && !gate.Recover {
 		return nil, nil
 	}
 
@@ -4904,45 +5038,53 @@ func (b *Browser) pollUIVideoResults(ctx context.Context, baseline map[string]st
 		return nil, false
 	}
 
-	if fresh, ok := tryExtract(); ok && complete {
+	if fresh, ok := tryExtract(); ok && gate.AcceptFresh {
+		if !complete {
+			log.Printf("generate_video: captured fresh video url without completion copy")
+		}
 		return fresh, nil
 	}
 
+	if recover == nil {
+		recover = &videoURLRecoverState{}
+	}
+
+	if gate.AcceptFresh && (recover.LastFallbackAt.IsZero() || time.Since(recover.LastFallbackAt) > 12*time.Second) {
+		recover.LastFallbackAt = time.Now()
+		b.harvestChainSingleBodies(ctx)
+		if item, ok := b.tryResolveCompletedVideoViaFallback(ctx); ok {
+			if _, seen := baseline[item.VideoURL]; !seen {
+				log.Printf("generate_video: resolved via fallback_api (%s)", shortVideoURL(item.VideoURL))
+				return []VideoItem{item}, nil
+			}
+		}
+	}
+
+	if !gate.Recover {
+		return nil, nil
+	}
+
+	if recover.LastDiagAt.IsZero() || time.Since(recover.LastDiagAt) > 15*time.Second {
+		where := "complete-no-url"
+		if !complete {
+			where = "stuck-spa-no-url"
+		}
+		logVideoExtractDiagnostics(ctx, where, len(b.snapshotCapturedVideoItems()))
+		if n := len(result.Videos); n > 0 {
+			sample := result.Videos[0].VideoURL
+			filtered := filterDOMVideoItems(result.Videos)
+			_, inBaseline := baseline[sample]
+			log.Printf("generate_video: raw extract videos=%d filtered=%d sample=%s cover=%v likely=%v inBaseline=%v",
+				n, len(filtered), shortVideoURL(sample), isCoverImageURL(sample), isLikelyVideoMediaURL(sample), inBaseline)
+		}
+		recover.LastDiagAt = time.Now()
+	}
+
+	shouldReload := recover.LastReloadAt.IsZero() || time.Since(recover.LastReloadAt) > 150*time.Second
+
+	// Player/download clicks need the completion landmark; a stuck SPA without
+	// that copy is recovered by reloading the pinned conversation (same as a human refresh).
 	if complete {
-		if recover == nil {
-			recover = &videoURLRecoverState{}
-		}
-		// Soft-reload / player clicking mid-Seedance can wipe the waiting UI.
-		// Only do heavy recovery after the job has had time to finish.
-		early := !submittedAt.IsZero() && time.Since(submittedAt) < 2*time.Minute
-
-		if recover.LastDiagAt.IsZero() || time.Since(recover.LastDiagAt) > 15*time.Second {
-			logVideoExtractDiagnostics(ctx, "complete-no-url", len(b.snapshotCapturedVideoItems()))
-			if n := len(result.Videos); n > 0 {
-				sample := result.Videos[0].VideoURL
-				filtered := filterDOMVideoItems(result.Videos)
-				_, inBaseline := baseline[sample]
-				log.Printf("generate_video: raw extract videos=%d filtered=%d sample=%s cover=%v likely=%v inBaseline=%v",
-					n, len(filtered), shortVideoURL(sample), isCoverImageURL(sample), isLikelyVideoMediaURL(sample), inBaseline)
-			}
-			recover.LastDiagAt = time.Now()
-		}
-
-		// Prefer fallback_api → playable URL (cover/player may never expose <video src>).
-		if recover.LastFallbackAt.IsZero() || time.Since(recover.LastFallbackAt) > 12*time.Second {
-			recover.LastFallbackAt = time.Now()
-			if item, ok := b.tryResolveCompletedVideoViaFallback(ctx); ok {
-				if _, seen := baseline[item.VideoURL]; !seen {
-					log.Printf("generate_video: resolved via fallback_api (%s)", shortVideoURL(item.VideoURL))
-					return []VideoItem{item}, nil
-				}
-			}
-		}
-
-		if early {
-			return nil, nil
-		}
-
 		shouldRetryPlayer := !recover.PlayerActivated ||
 			(time.Since(recover.LastPlayerAt) > 25*time.Second)
 		if shouldRetryPlayer {
@@ -4964,10 +5106,17 @@ func (b *Browser) pollUIVideoResults(ctx context.Context, baseline map[string]st
 						return []VideoItem{item}, nil
 					}
 				}
-			} else if !recover.PlayerActivated {
+				return nil, nil
+			}
+			if !recover.PlayerActivated {
 				recover.LastPlayerAt = time.Now()
 			}
-		} else if !recover.DownloadClicked {
+		}
+		shouldRetryDownload := recover.LastDownloadAt.IsZero() ||
+			(!recover.DownloadClicked && time.Since(recover.LastDownloadAt) > 8*time.Second) ||
+			(recover.DownloadClicked && time.Since(recover.LastDownloadAt) > 25*time.Second)
+		if shouldRetryDownload {
+			recover.LastDownloadAt = time.Now()
 			if tryClickVideoDownload(ctx) {
 				recover.DownloadClicked = true
 				if err := chromedp.Run(ctx, chromedp.Sleep(2*time.Second)); err != nil {
@@ -4981,41 +5130,29 @@ func (b *Browser) pollUIVideoResults(ctx context.Context, baseline map[string]st
 				if fresh, ok := tryExtract(); ok {
 					return fresh, nil
 				}
-			} else {
-				recover.DownloadClicked = true
 			}
-		} else if !recover.ChainReloaded {
-			// Soft-reload the job chat so /im/chain/single re-fires with fallback_api.
-			convID := currentChatConversationID(ctx)
-			if convID != "" {
-				log.Printf("generate_video: soft-reload conversation %s to capture fallback_api", convID)
-				targetURL := fmt.Sprintf("%s/chat/%s", doubaoBaseURL, convID)
-				if err := chromedp.Run(ctx,
-					chromedp.Navigate(targetURL),
-					chromedp.Sleep(4*time.Second),
-				); err != nil {
-					log.Printf("generate_video: soft-reload navigate: %v", err)
-				} else {
-					_ = installVideoCaptureHook(ctx)
-					_ = dismissDoubaoPopups(ctx)
-					b.harvestChainSingleBodies(ctx)
-					if err := evalReturnByValue(ctx, extractVideosFromPageJS, &result); err == nil {
-						if fresh, ok := tryExtract(); ok {
-							return fresh, nil
-						}
-					}
-					if item, ok := b.tryResolveCompletedVideoViaFallback(ctx); ok {
-						if _, seen := baseline[item.VideoURL]; !seen {
-							return []VideoItem{item}, nil
-						}
-					}
+			return nil, nil
+		}
+	}
+
+	if shouldReload {
+		if err := b.softReloadVideoConversation(ctx, jobConvID); err == nil {
+			if err := evalReturnByValue(ctx, extractVideosFromPageJS, &result); err == nil {
+				if fresh, ok := tryExtract(); ok {
+					return fresh, nil
 				}
 			}
-			recover.ChainReloaded = true
-			recover.PlayerActivated = false
-			recover.DownloadClicked = false
-			recover.LastPlayerAt = time.Time{}
+			if item, ok := b.tryResolveCompletedVideoViaFallback(ctx); ok {
+				if _, seen := baseline[item.VideoURL]; !seen {
+					return []VideoItem{item}, nil
+				}
+			}
 		}
+		recover.LastReloadAt = time.Now()
+		recover.ChainReloaded = true
+		recover.PlayerActivated = false
+		recover.DownloadClicked = false
+		recover.LastPlayerAt = time.Time{}
 	}
 
 	return nil, nil

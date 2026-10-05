@@ -89,6 +89,11 @@ const {
   addingEpisode,
   removeEpisode,
   goToEpisode,
+  autoVideoRun,
+  startAutoVideoRun,
+  autoVideoAction,
+  acceptAutoVideoCandidate,
+  focusAutoVideoCurrent,
 } = useNovalyInject()
 
 const route = useRoute()
@@ -255,6 +260,76 @@ function statusTagType(shot: Shot): 'success' | 'warning' | 'danger' | 'info' {
   if (s === 'error') return 'danger'
   return 'info'
 }
+
+const autoCurrentItem = computed(() => {
+  const run = autoVideoRun.value
+  if (!run?.items?.length) return undefined
+  const current = run.items.find(item => item.shotId === run.currentShotId)
+  if (run.status === 'paused') {
+    const blocked = [...run.items].reverse().find(item =>
+      item.status === 'failed' || item.status === 'paused' || (item.status === 'reviewing' && !!item.failureSummary),
+    )
+    if (blocked && blocked.status !== 'passed' && (!current || (current.status === 'pending' && !current.attempts))) {
+      return blocked
+    }
+  }
+  return current
+})
+const autoCurrentShot = computed(() => {
+  const id = autoCurrentItem.value?.shotId
+  if (!id) return undefined
+  return pageShots.value.find(s => s.id === id)
+})
+const autoPauseText = computed(() => {
+  const run = autoVideoRun.value
+  if (!run) return ''
+  const item = autoCurrentItem.value
+  if (run.status === 'paused' && item && item.status === 'pending' && !item.attempts) {
+    return `已暂停在分镜 ${String(item.sortOrder).padStart(2, '0')}，这一镜还没开始生成。点「继续」从本镜接着做。`
+  }
+  return run.pauseReason || run.errorMessage || ''
+})
+const autoCanAccept = computed(() => {
+  const run = autoVideoRun.value
+  const item = autoCurrentItem.value
+  if (!run || !item?.candidateResourceId) return false
+  if (['completed', 'cancelled'].includes(run.status)) return false
+  if (item.status === 'passed') return false
+  return true
+})
+const autoRunning = computed(() => ['running', 'pause_requested'].includes(autoVideoRun.value?.status || ''))
+const autoNeedsManualRetry = computed(() => !!autoCurrentItem.value && (
+  autoCurrentItem.value.status === 'failed' || autoCurrentItem.value.attempts >= 3
+))
+function autoStageLabel(stage?: string) {
+  const status = autoVideoRun.value?.status
+  if (status === 'paused') return '已暂停'
+  if (status === 'completed') return '已完成'
+  if (status === 'cancelled') return '已停止'
+  return ({ reviewing: '自动审核', generating: '生成候选视频', extracting_frame: '承接上一镜尾帧' } as Record<string, string>)[stage || ''] || '进行中'
+}
+function shotInAutoRun(shot: Shot) {
+  return !!autoVideoRun.value?.items.some(item => item.shotId === shot.id && !['passed', 'failed'].includes(item.status)) && autoRunning.value
+}
+function autoItemFor(shot: Shot) { return autoVideoRun.value?.items.find(item => item.shotId === shot.id) }
+function autoShotBadge(shot: Shot): { type: 'success' | 'warning' | 'danger' | 'info'; label: string } | null {
+  const item = autoItemFor(shot)
+  if (!item || !autoVideoRun.value) return null
+  if (item.status === 'passed') return { type: 'success', label: '审核通过' }
+  if (item.status === 'failed') return { type: 'danger', label: '审核未通过' }
+  if (item.status === 'generating') return { type: 'warning', label: '自动生成中' }
+  if (item.status === 'reviewing') return { type: 'warning', label: '自动审核中' }
+  if (item.status === 'paused' || (autoVideoRun.value.status === 'paused' && shot.id === autoVideoRun.value.currentShotId)) {
+    return { type: 'warning', label: '自动任务已暂停' }
+  }
+  return null
+}
+function shotVideoVersionLabel(resource: { id: number }, shotId: number) {
+  const ordered = [...shotVideoVersions(shotId)].sort((a, b) => a.id - b.id)
+  const idx = ordered.findIndex(v => v.id === resource.id)
+  if (idx <= 0) return '版本 1'
+  return `版本 ${idx + 1}`
+}
 </script>
 
 <template>
@@ -309,6 +384,50 @@ function statusTagType(shot: Shot): 'success' | 'warning' | 'danger' | 'info' {
         </div>
       </div>
 
+      <el-card v-if="autoVideoRun && !['completed', 'cancelled'].includes(autoVideoRun.status)" class="auto-video-panel" shadow="never">
+        <div class="auto-video-head">
+          <div>
+            <b>全自动视频 · {{ autoVideoRun.passedCount }}/{{ autoVideoRun.totalCount }} 镜通过</b>
+            <p>
+              {{ autoStageLabel(autoVideoRun.stage) }}
+              <template v-if="autoCurrentItem">
+                · 正在处理 <b>分镜 {{ String(autoCurrentItem.sortOrder).padStart(2, '0') }}</b>
+                <template v-if="autoCurrentShot?.label">「{{ autoCurrentShot.label }}」</template>
+                · 已生成 {{ autoCurrentItem.attempts }}/3 版
+              </template>
+            </p>
+          </div>
+          <div class="auto-video-actions">
+            <el-button v-if="autoRunning" size="small" @click="autoVideoAction('pause')">暂停</el-button>
+            <el-button v-if="autoVideoRun.status === 'paused' && !autoNeedsManualRetry" size="small" type="primary" @click="autoVideoAction('resume')">继续</el-button>
+            <el-button v-if="autoVideoRun.status === 'paused' && autoNeedsManualRetry" size="small" type="primary" @click="autoVideoAction('retry')">再次重试本镜</el-button>
+            <el-button v-if="autoCurrentItem" size="small" @click="focusAutoVideoCurrent()">查看分镜 {{ String(autoCurrentItem.sortOrder).padStart(2, '0') }}</el-button>
+            <el-button v-if="!['completed', 'cancelled'].includes(autoVideoRun.status)" size="small" type="danger" plain @click="autoVideoAction('cancel')">停止</el-button>
+          </div>
+        </div>
+        <el-progress :percentage="Math.round(autoVideoRun.passedCount * 100 / Math.max(1, autoVideoRun.totalCount))" />
+        <el-alert
+          v-if="autoPauseText"
+          :type="autoVideoRun.status === 'paused' ? 'warning' : 'info'"
+          :closable="false"
+          show-icon
+          :title="autoPauseText"
+        />
+        <div v-if="autoCurrentItem?.review" class="auto-review-report">
+          <p v-if="autoCurrentItem.review.checks?.length"><b>通过：</b>{{ autoCurrentItem.review.checks.join('、') }}</p>
+          <p v-if="autoCurrentItem.review.failures?.length" class="review-failed"><b>未通过：</b>{{ autoCurrentItem.review.failures.join('；') }}</p>
+          <p v-if="autoCurrentItem.review.transcript"><b>识别对白：</b>{{ autoCurrentItem.review.transcript }}</p>
+        </div>
+        <p v-if="autoCurrentItem?.candidateVideoUrl && autoCanAccept" class="auto-candidate-caption">
+          下面预览的是 <b>分镜 {{ String(autoCurrentItem.sortOrder).padStart(2, '0') }}</b> 的候选成片。自动审核未通过时仍可人工采用。
+        </p>
+        <video v-if="autoCurrentItem?.candidateVideoUrl && autoCanAccept" class="auto-candidate-video" :src="autoCurrentItem.candidateVideoUrl" controls preload="metadata" />
+        <div v-if="autoCanAccept" class="auto-video-actions">
+          <el-button type="primary" @click="acceptAutoVideoCandidate(autoCurrentItem?.candidateResourceId)">采用当前版本并继续</el-button>
+          <el-button v-if="autoVideoRun.status === 'paused'" @click="autoVideoAction('retry')">再次重试本镜</el-button>
+        </div>
+      </el-card>
+
       <el-empty v-if="!shotTotal && !shotPageLoading" description="还没有分镜">
         <template #image><span class="empty-icon">✦</span></template>
         <p class="empty-hint">剧本在「剧本」页填写。提取资产并出图后，再在这里拆镜或手动添加分镜。</p>
@@ -342,7 +461,7 @@ function statusTagType(shot: Shot): 'success' | 'warning' | 'danger' | 'info' {
             </button>
           </div>
 
-          <div :data-shot-id="shot.id">
+          <div :data-shot-id="shot.id" :class="{ 'is-auto-current': autoVideoRun?.currentShotId === shot.id && autoVideoRun.status === 'paused' }">
           <el-card
             class="shot-card"
             :class="{ collapsed: !isShotExpanded(shot.id), highlight: highlightedShotId === shot.id }"
@@ -379,6 +498,9 @@ function statusTagType(shot: Shot): 'success' | 'warning' | 'danger' | 'info' {
                 <el-tag size="small" type="info" effect="plain">{{ shot.duration }}s · {{ shot.resolution }}</el-tag>
                 <el-tag size="small" :type="statusTagType(shot)" effect="dark">
                   {{ shotUiStatusLabel(shot) }}
+                </el-tag>
+                <el-tag v-if="autoShotBadge(shot)" size="small" :type="autoShotBadge(shot)?.type" effect="plain">
+                  {{ autoShotBadge(shot)?.label }}
                 </el-tag>
                 <el-tag v-if="!isShotExpanded(shot.id) && shot.refs.length" size="small" effect="plain">
                   {{ shot.refs.length }} 张参考
@@ -444,6 +566,14 @@ function statusTagType(shot: Shot): 'success' | 'warning' | 'danger' | 'info' {
           v-if="!isShotExpanded(shot.id) && shot.errorMessage && shot.status !== 'generating' && generating !== shot.id"
           :title="shot.errorMessage"
           type="error"
+          :closable="false"
+          show-icon
+          class="shot-error-inline"
+        />
+        <el-alert
+          v-if="!isShotExpanded(shot.id) && autoItemFor(shot)?.failureSummary && autoVideoRun?.status === 'paused' && shot.id === autoVideoRun.currentShotId"
+          :title="autoItemFor(shot)?.failureSummary"
+          type="warning"
           :closable="false"
           show-icon
           class="shot-error-inline"
@@ -630,11 +760,17 @@ function statusTagType(shot: Shot): 'success' | 'warning' | 'danger' | 'info' {
               <el-button
                 type="primary"
                 :loading="generating === shot.id"
-                :disabled="uploadingShot === shot.id"
+                :disabled="uploadingShot === shot.id || shotInAutoRun(shot)"
                 @click="generateShot(shot)"
               >
                 {{ generating === shot.id ? '生成中…' : '生成视频' }}
               </el-button>
+              <el-button
+                type="success"
+                plain
+                :disabled="!!autoVideoRun && !['completed', 'cancelled'].includes(autoVideoRun.status)"
+                @click="startAutoVideoRun(shot)"
+              >从本镜全自动生成</el-button>
             </div>
             <div class="composer-bar composer-bar-extra">
               <el-button
@@ -747,7 +883,7 @@ function statusTagType(shot: Shot): 'success' | 'warning' | 'danger' | 'info' {
                     :value="v.id"
                     :disabled="applyingShotVideo === v.id"
                   >
-                    {{ v.name }}
+                    {{ shotVideoVersionLabel(v, shot.id) }}
                   </el-radio-button>
                 </el-radio-group>
               </div>
@@ -773,6 +909,26 @@ function statusTagType(shot: Shot): 'success' | 'warning' | 'danger' | 'info' {
     </div>
   </div>
 </template>
+
+<style scoped>
+.auto-video-panel {
+  position: sticky;
+  top: 8px;
+  z-index: 8;
+  margin: 14px 0 18px;
+  border-color: rgba(255,120,90,.35);
+  background: #1c1814;
+}
+.auto-video-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 10px; }
+.auto-video-head p { margin: 5px 0 0; color: var(--el-text-color-secondary); }
+.auto-video-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.auto-review-report { margin: 12px 0; padding: 10px 12px; border-radius: 8px; background: rgba(0,0,0,.16); }
+.auto-review-report p { margin: 4px 0; }
+.review-failed { color: var(--el-color-danger); }
+.auto-candidate-caption { margin: 10px 0 0; color: var(--el-text-color-regular); font-size: 13px; }
+.auto-candidate-video { display: block; width: min(360px, 100%); max-height: 480px; margin: 8px 0 12px; border-radius: 8px; background: #000; }
+.shot-auto-fail { margin: 0 16px 10px 42px; color: var(--el-color-danger); font-size: 12px; line-height: 1.45; }
+</style>
 
 <style scoped>
 .episodes-panel {
@@ -832,6 +988,10 @@ function statusTagType(shot: Shot): 'success' | 'warning' | 'danger' | 'info' {
 .shot-card.highlight {
   border-color: #ff785a;
   box-shadow: 0 0 0 1px #ff785a;
+}
+
+.is-auto-current .shot-card {
+  border-color: rgba(245, 158, 11, 0.65);
 }
 
 .shot-card :deep(.el-card__body) {

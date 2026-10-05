@@ -2224,44 +2224,38 @@ func (s *ArkService) waitVideoTask(provider models.AIProvider, taskID string, on
 }
 
 func (s *ArkService) DownloadVideo(rawURL string) ([]byte, error) {
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		data, err := s.downloadVideoAttempt(rawURL)
+		if err == nil {
+			return data, nil
+		}
+		lastErr = err
+		log.Printf("download video attempt %d/3: %v", attempt, err)
+		if attempt < 3 {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
+	}
+	return nil, lastErr
+}
+
+const videoDownloadTimeout = 5 * time.Minute
+
+func (s *ArkService) downloadVideoAttempt(rawURL string) ([]byte, error) {
 	candidates := videoDownloadCandidates(rawURL)
 	if len(candidates) == 0 {
 		return nil, errors.New("下载视频失败：无可用地址")
 	}
-	if len(candidates) == 1 {
-		return s.downloadBytesOnce(context.Background(), candidates[0], 90*time.Second, false)
-	}
-
-	// Race proxy + CDN: whichever finishes first wins. Avoids waiting for a hung
-	// localhost proxy (up to 120s) before trying the direct CDN URL.
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-
-	type result struct {
-		data []byte
-		err  error
-		url  string
-	}
-	ch := make(chan result, len(candidates))
-	for _, u := range candidates {
-		go func(target string) {
-			data, err := s.downloadBytesOnce(ctx, target, 0, false)
-			ch <- result{data: data, err: err, url: target}
-		}(u)
-	}
-
+	// Sequential: the image proxy used to win a 90s race with a truncated body.
 	var lastErr error
-	pending := len(candidates)
-	for pending > 0 {
-		r := <-ch
-		pending--
-		if r.err == nil && len(r.data) > 0 {
-			cancel()
-			log.Printf("download video ok (%d bytes) via %s", len(r.data), truncateURL(r.url))
-			return r.data, nil
+	for _, target := range candidates {
+		data, err := s.downloadBytesOnce(context.Background(), target, videoDownloadTimeout, false)
+		if err == nil {
+			log.Printf("download video ok (%d bytes) via %s", len(data), truncateURL(target))
+			return data, nil
 		}
-		lastErr = r.err
-		log.Printf("download video failed (%s): %v", truncateURL(r.url), r.err)
+		lastErr = err
+		log.Printf("download video failed (%s): %v", truncateURL(target), err)
 	}
 	if lastErr == nil {
 		lastErr = errors.New("下载视频失败：无可用地址")
@@ -2274,11 +2268,10 @@ func videoDownloadCandidates(rawURL string) []string {
 	if rawURL == "" {
 		return nil
 	}
-	out := []string{rawURL}
 	if unwrapped := unwrapDoubaoProxyURL(rawURL); unwrapped != "" && unwrapped != rawURL {
-		out = append(out, unwrapped)
+		return []string{unwrapped, rawURL}
 	}
-	return out
+	return []string{rawURL}
 }
 
 func (s *ArkService) downloadVideoOnce(parent context.Context, target string, timeout time.Duration) ([]byte, error) {
@@ -2306,7 +2299,17 @@ func (s *ArkService) downloadBytesOnce(parent context.Context, target string, ti
 	if resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("下载视频失败 HTTP %d", resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 80<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxVideoDownloadBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxVideoDownloadBytes {
+		return nil, fmt.Errorf("视频超过本地下载上限 %dMB", maxVideoDownloadBytes>>20)
+	}
+	if err := ValidateDownloadedVideo(data, resp.ContentLength); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func truncateURL(u string) string {
@@ -2321,7 +2324,7 @@ func unwrapDoubaoProxyURL(raw string) string {
 	if err != nil {
 		return ""
 	}
-	if strings.Contains(u.Path, "/images/proxy") {
+	if strings.Contains(u.Path, "/images/proxy") || strings.Contains(u.Path, "/videos/proxy") {
 		if orig := u.Query().Get("url"); orig != "" {
 			return orig
 		}
@@ -2332,13 +2335,22 @@ func unwrapDoubaoProxyURL(raw string) string {
 func setCDNFetchHeaders(req *http.Request, target string) {
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Encoding", "identity")
 	host := ""
 	if u, err := url.Parse(target); err == nil {
 		host = strings.ToLower(u.Hostname())
 	}
-	if strings.Contains(host, "douyin") || strings.Contains(host, "byte") || strings.Contains(host, "snssdk") || strings.Contains(host, "ibyte") {
+	if strings.Contains(host, "douyin") || strings.Contains(host, "byte") || strings.Contains(host, "snssdk") ||
+		strings.Contains(host, "ibyte") || strings.Contains(host, "ixigua") || strings.Contains(host, "tos-cn") {
 		req.Header.Set("Referer", "https://www.doubao.com/chat/")
 	}
+}
+
+func (s *ArkService) EnsureDoubaoWebReady(provider models.AIProvider) error {
+	if !IsDoubaoWebAPI(provider) {
+		return nil
+	}
+	return s.testDoubaoWeb(provider)
 }
 
 func (s *ArkService) Test(provider models.AIProvider, model models.AIModel) error {

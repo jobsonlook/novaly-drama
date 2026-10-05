@@ -165,9 +165,23 @@ func (m *Manager) startChrome() error {
 		cmd = exec.Command(script)
 	}
 	cmd.Dir = filepath.Dir(filepath.Dir(script)) // repo root when script is scripts/start-chrome.sh
+	extDir := ResolveExtensionDir(cmd.Dir)
+	if extDir != "" {
+		_ = os.Setenv(extensionEnv, extDir)
+		_ = os.Setenv(chromeRootEnv, cmd.Dir)
+		log.Printf("chrome: auto-load extension %s", extDir)
+	}
+	if m.SessionDir != "" {
+		if err := EnsureDeveloperMode(m.SessionDir); err != nil {
+			log.Printf("chrome: seed developer mode: %v", err)
+		}
+	}
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("DOUBAO_CDP_PORT=%d", m.CDPPort),
 	)
+	if extDir != "" {
+		cmd.Env = append(cmd.Env, extensionEnv+"="+extDir, chromeRootEnv+"="+cmd.Dir)
+	}
 	if m.SessionDir != "" {
 		cmd.Env = append(cmd.Env,
 			"DOUBAO_SESSION_DIR="+m.SessionDir,

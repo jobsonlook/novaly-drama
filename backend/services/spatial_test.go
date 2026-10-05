@@ -77,6 +77,19 @@ func TestEnsureMentionedCharacterPicksDoesNotCapAtFive(t *testing.T) {
 	}
 }
 
+func TestEnsureExplicitGroupCharacterPicksMatchesChildSynonym(t *testing.T) {
+	script := "数百孩子排队测灵，阿砚认出另外六名刚取回灵根的孩子，站到六人中间。"
+	candidates := []RefMatchCandidate{
+		{ID: 1, Type: "character", Name: "阿砚"},
+		{ID: 2, Type: "character", Name: "六名孩童"},
+		{ID: 3, Type: "character", Name: "七名孩童"},
+	}
+	got := EnsureExplicitGroupCharacterPicks([]RefMatchPick{{ID: 1, Label: "阿砚"}}, candidates, script)
+	if len(got) != 2 || got[1].ID != 2 {
+		t.Fatalf("expected only the explicit six-child group, got %#v", got)
+	}
+}
+
 func TestKeepCharacterFocusOpeningTwoShot(t *testing.T) {
 	script := "【0-3秒】镜头：中景，韩铮(左中)3/4正面朝右，阿彪(右中)3/4正面朝左。\n【3-6秒】包厢灯色暧昧。\n【6-10秒】韩铮说：「走错了。」小嘉(左前)3/4正面朝右，小南(右前)3/4正面朝左；小嘉说：「请进。」小南说：「坐。」"
 	names := []string{"韩铮", "小嘉", "小南", "阿彪"}

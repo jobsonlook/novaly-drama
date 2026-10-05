@@ -14,6 +14,17 @@ export type Shot = {
   motionGridRefs?: ResourceGenRef[]
   createdAt?: string; updatedAt?: string
 }
+export type AutoVideoReview = { passed: boolean; checks: string[]; failures: string[]; transcript?: string }
+export type AutoVideoRunItem = {
+  id: number; runId: number; shotId: number; sortOrder: number
+  status: string; attempts: number; candidateResourceId?: number; candidateVideoUrl?: string; acceptedResourceId?: number
+  review?: AutoVideoReview; failureSummary?: string
+}
+export type AutoVideoRun = {
+  id: number; projectId: number; episodeId: number; startShotId: number; currentShotId: number
+  status: string; stage: string; passedCount: number; totalCount: number; maxRetries: number
+  pauseReason?: string; errorMessage?: string; items: AutoVideoRunItem[]
+}
 export type Episode = {
   id: number
   projectId: number

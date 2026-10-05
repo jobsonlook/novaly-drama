@@ -18,7 +18,7 @@ func Open(path string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = db.AutoMigrate(&models.Project{}, &models.Episode{}, &models.Shot{}, &models.Resource{}, &models.AIProvider{}, &models.AIModel{}, &models.ImageGenerationJob{}, &models.CrewJob{}, &models.EditProject{}); err != nil {
+	if err = db.AutoMigrate(&models.Project{}, &models.Episode{}, &models.Shot{}, &models.Resource{}, &models.AIProvider{}, &models.AIModel{}, &models.ImageGenerationJob{}, &models.CrewJob{}, &models.EditProject{}, &models.AutoVideoRun{}, &models.AutoVideoRunItem{}, &models.AppSetting{}); err != nil {
 		return nil, err
 	}
 	// In-flight image jobs cannot survive process restart; mark them failed so the UI can recover.

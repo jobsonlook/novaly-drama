@@ -101,6 +101,19 @@ if [[ -z "$CHROME" || ! -x "$CHROME" ]]; then
   exit 1
 fi
 
+EXT_DIR="${DOUBAO_CHROME_EXTENSION_DIR:-$ROOT/chrome-extension}"
+EXT_ARGS=()
+DISABLE_FEATURES="CalculateNativeWinOcclusion,DisableLoadExtensionCommandLineSwitch"
+if [[ -f "$EXT_DIR/manifest.json" ]]; then
+  echo "Extension:   $EXT_DIR"
+  EXT_ARGS+=(
+    --enable-unsafe-extension-debugging
+    --load-extension="$EXT_DIR"
+  )
+else
+  echo "Extension:   (missing $EXT_DIR — 无水印下载插件未自动加载)"
+fi
+
 echo "Chrome:      $CHROME"
 echo "Session dir: $SESSION_DIR"
 echo "CDP port:    $CDP_PORT"
@@ -119,7 +132,8 @@ if [[ "$(uname)" == "Darwin" ]]; then
     --disable-background-timer-throttling \
     --disable-backgrounding-occluded-windows \
     --disable-renderer-backgrounding \
-    --disable-features=CalculateNativeWinOcclusion \
+    --disable-features="$DISABLE_FEATURES" \
+    "${EXT_ARGS[@]}" \
     "https://www.doubao.com/chat/"
 fi
 
@@ -131,8 +145,9 @@ exec "$CHROME" \
   --disable-background-timer-throttling \
   --disable-backgrounding-occluded-windows \
   --disable-renderer-backgrounding \
-  --disable-features=CalculateNativeWinOcclusion \
+  --disable-features="$DISABLE_FEATURES" \
   --disable-dev-shm-usage \
   --disable-gpu \
   --no-sandbox \
+  "${EXT_ARGS[@]}" \
   "https://www.doubao.com/chat/"

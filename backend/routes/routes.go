@@ -64,9 +64,11 @@ func New(db *gorm.DB, cfg config.Config) *gin.Engine {
 		PixRefRelay: services.DerivePixAPIRelayOrigin(cfg.PixAPIBaseURL),
 	}
 	shot := &controllers.ShotController{DB: db, Ark: ark, Storage: storage, Resource: resource}
+	autoVideo := &controllers.AutoVideoController{DB: db, Ark: ark, Storage: storage, Shot: shot}
 	crewCtl := &controllers.CrewController{DB: db, Ark: ark, Storage: storage, Resource: resource}
 	editor := &controllers.EditorController{DB: db, Storage: storage}
 	shot.ResumeInterruptedVideoJobs()
+	autoVideo.ResumeInterrupted()
 	direct := &controllers.DirectUploadController{DB: db, Storage: storage}
 	settings := &controllers.SettingsController{DB: db, Ark: ark}
 	tts := &controllers.TTSController{
@@ -193,6 +195,13 @@ func New(db *gorm.DB, cfg config.Config) *gin.Engine {
 	api.POST("/shots/:id/match-refs", shot.MatchRefs)
 	api.POST("/shots/:id/previous-frame", shot.PreviousFrame)
 	api.POST("/shots/:id/generate", shot.Generate)
+	api.POST("/shots/:id/auto-video-runs", autoVideo.Start)
+	api.GET("/episodes/:id/auto-video-run", autoVideo.Get)
+	api.POST("/auto-video-runs/:id/pause", autoVideo.Pause)
+	api.POST("/auto-video-runs/:id/resume", autoVideo.Resume)
+	api.POST("/auto-video-runs/:id/cancel", autoVideo.Cancel)
+	api.POST("/auto-video-runs/:id/accept", autoVideo.Accept)
+	api.POST("/auto-video-runs/:id/retry", autoVideo.Retry)
 	api.POST("/shots/:id/upload-video", shot.UploadVideo)
 	api.POST("/shots/:id/direct-upload-video", direct.PresignShotVideo)
 	api.POST("/shots/:id/confirm-video", direct.ConfirmShotVideo)
@@ -205,6 +214,9 @@ func New(db *gorm.DB, cfg config.Config) *gin.Engine {
 	api.POST("/settings/providers/:id/models", settings.AddModel)
 	api.PUT("/settings/models/:id", settings.UpdateModel)
 	api.POST("/settings/providers/:id/test", settings.TestProvider)
+	api.GET("/settings/volc-asr", autoVideo.GetASRSettings)
+	api.PUT("/settings/volc-asr", autoVideo.SaveASRSettings)
+	api.POST("/settings/volc-asr/test", autoVideo.TestASR)
 	api.GET("/tts/status", tts.Status)
 	api.GET("/tts/from-project/:projectId/shots", tts.ListExtractShots)
 	api.POST("/tts/from-project/:projectId", tts.ExtractProject)

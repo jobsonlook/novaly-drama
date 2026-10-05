@@ -44,7 +44,20 @@ func windowsChromeCommand(session string, port int) (*exec.Cmd, error) {
 	if err := os.MkdirAll(session, 0700); err != nil {
 		return nil, err
 	}
-	return exec.Command(binary, fmt.Sprintf("--remote-debugging-port=%d", port), "--remote-debugging-address=127.0.0.1", "--user-data-dir="+session, "--no-first-run", "--no-default-browser-check", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "https://www.doubao.com/chat/"), nil
+	_ = EnsureDeveloperMode(session)
+	args := []string{
+		fmt.Sprintf("--remote-debugging-port=%d", port),
+		"--remote-debugging-address=127.0.0.1",
+		"--user-data-dir=" + session,
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--disable-background-timer-throttling",
+		"--disable-renderer-backgrounding",
+		disableFeaturesArg("CalculateNativeWinOcclusion"),
+	}
+	args = append(args, LoadExtensionArgs(ResolveExtensionDir(""))...)
+	args = append(args, "https://www.doubao.com/chat/")
+	return exec.Command(binary, args...), nil
 }
 func parseWindowsListeners(output string, port int) []int {
 	var out []int

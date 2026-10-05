@@ -30,7 +30,16 @@ type Manager struct {
 	shutdownToken string
 }
 
-func New() *Manager { root, _ := filepath.Abs("../doubao-web-api"); return &Manager{root: root} }
+func New() *Manager {
+	root, _ := filepath.Abs("../doubao-web-api")
+	m := &Manager{root: root}
+	if raw, err := os.ReadFile(m.tokenPath()); err == nil {
+		m.shutdownToken = strings.TrimSpace(string(raw))
+	}
+	return m
+}
+
+func (m *Manager) tokenPath() string { return filepath.Join(m.root, "data", "local-shutdown.token") }
 func (m *Manager) ready() bool {
 	client := http.Client{Timeout: time.Second}
 	res, err := client.Get("http://127.0.0.1:8086/health")
@@ -58,7 +67,8 @@ func (m *Manager) Status() gin.H {
 	if m.stopping {
 		state = "stopping"
 	}
-	return gin.H{"state": state, "managed": m.cmd != nil, "ready": ready, "error": m.lastError, "adminUrl": "http://127.0.0.1:8086/admin", "logPath": filepath.Join(m.root, "data/service.log"), "storage": "local"}
+	managed := m.cmd != nil || (ready && strings.TrimSpace(m.shutdownToken) != "")
+	return gin.H{"state": state, "managed": managed, "ready": ready, "error": m.lastError, "adminUrl": "http://127.0.0.1:8086/admin", "logPath": filepath.Join(m.root, "data/service.log"), "storage": "local"}
 }
 func (m *Manager) Start() error {
 	m.mu.Lock()
@@ -91,6 +101,10 @@ func (m *Manager) Start() error {
 		return err
 	}
 	m.shutdownToken = hex.EncodeToString(token)
+	if err := os.WriteFile(m.tokenPath(), []byte(m.shutdownToken), 0600); err != nil {
+		log.Close()
+		return fmt.Errorf("保存本地豆包控制令牌失败: %w", err)
+	}
 	cmd := exec.Command(binary)
 	cmd.Dir = m.root
 	cmd.Stdout = log
@@ -111,6 +125,8 @@ func (m *Manager) Start() error {
 	cmd.Env = append(cmd.Env, "DOUBAO_LOCAL_SHUTDOWN_TOKEN="+m.shutdownToken, "PORT=8086", "DOUBAO_CDP_PORT=9322", "DOUBAO_CDP_URL=http://127.0.0.1:9322", "MAX_PARALLEL_VIDEO=2", "DOUBAO_SESSION_DIR="+filepath.Join(m.root, "session"))
 	if err := cmd.Start(); err != nil {
 		log.Close()
+		_ = os.Remove(m.tokenPath())
+		m.shutdownToken = ""
 		return err
 	}
 	m.cmd = cmd
@@ -126,6 +142,8 @@ func (m *Manager) Start() error {
 		}
 		m.cmd = nil
 		m.stopping = false
+		_ = os.Remove(m.tokenPath())
+		m.shutdownToken = ""
 		close(done)
 		m.mu.Unlock()
 	}()
@@ -134,8 +152,37 @@ func (m *Manager) Start() error {
 func (m *Manager) Stop() error {
 	m.mu.Lock()
 	if m.cmd == nil {
+		token := strings.TrimSpace(m.shutdownToken)
 		m.mu.Unlock()
-		return nil
+		if token == "" || !m.ready() {
+			return nil
+		}
+		// Novaly may have restarted while its child kept running. The persisted,
+		// private token lets the new process stop only that child, never an
+		// unrelated service which merely happens to occupy port 8086.
+		req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8086/internal/local-shutdown", nil)
+		req.Header.Set("X-Novaly-Shutdown", token)
+		client := http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}}
+		res, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("停止已恢复管理的豆包服务失败: %w", err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusAccepted {
+			return fmt.Errorf("端口上的服务不是当前 Novaly 启动的豆包服务 (HTTP %d)", res.StatusCode)
+		}
+		deadline := time.Now().Add(30 * time.Second)
+		for time.Now().Before(deadline) {
+			if !m.ready() {
+				_ = os.Remove(m.tokenPath())
+				m.mu.Lock()
+				m.shutdownToken = ""
+				m.mu.Unlock()
+				return nil
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		return fmt.Errorf("豆包服务仍在退出，请稍后刷新")
 	}
 	cmd, done, token := m.cmd, m.done, m.shutdownToken
 	m.stopping = true

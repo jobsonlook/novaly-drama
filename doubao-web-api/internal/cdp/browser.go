@@ -109,8 +109,16 @@ func browserContextOpts(extra ...chromedp.ContextOption) []chromedp.ContextOptio
 	return append(opts, extra...)
 }
 
+const evalTimeout = 12 * time.Second
+
+func withEvalTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, evalTimeout)
+}
+
 func evalReturnByValue(ctx context.Context, js string, out any) error {
-	return chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+	evalCtx, cancel := withEvalTimeout(ctx)
+	defer cancel()
+	return chromedp.Run(evalCtx, chromedp.ActionFunc(func(ctx context.Context) error {
 		v, exp, evalErr := runtime.Evaluate(js).
 			WithReturnByValue(true).
 			Do(ctx)
@@ -125,6 +133,15 @@ func evalReturnByValue(ctx context.Context, js string, out any) error {
 		}
 		return json.Unmarshal(v.Value, out)
 	}))
+}
+
+func runWithTimeout(ctx context.Context, d time.Duration, actions ...chromedp.Action) error {
+	if d <= 0 {
+		d = evalTimeout
+	}
+	runCtx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
+	return chromedp.Run(runCtx, actions...)
 }
 
 func (b *Browser) Start(ctx context.Context) error {
@@ -313,6 +330,7 @@ func (b *Browser) connectToTab(ctx context.Context, tab *tabInfo) (string, error
 	b.connectedURL = href
 	b.captureListening = false
 	b.installVideoNetworkCapture(newCtx)
+	b.installUnwatermarkExtension()
 	log.Printf("cdp: connected to tab %s url=%s", shortTabID(tab.ID), href)
 	return href, nil
 }

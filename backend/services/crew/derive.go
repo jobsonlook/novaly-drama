@@ -105,6 +105,9 @@ func AnalyzeDerivatives(ark *services.ArkService, provider models.AIProvider, mo
 		if !ok {
 			continue
 		}
+		if item.Type == "scene" && isIndependentSceneName(item.Name, parent.Name) {
+			continue
+		}
 		pk := item.Type + ":" + strings.ToLower(parent.Name)
 		if perParent[pk] >= 5 {
 			continue
@@ -124,4 +127,35 @@ func AnalyzeDerivatives(ark *services.ArkService, provider models.AIProvider, mo
 		out = append(out, item)
 	}
 	return out, nil
+}
+
+func isSceneTimeVariantName(name string) bool {
+	for _, tok := range []string{"夜景", "日景", "黄昏", "清晨", "黎明", "深夜", "破晓", "时分"} {
+		if strings.Contains(name, tok) {
+			return true
+		}
+	}
+	return false
+}
+
+// isIndependentSceneName rejects "derivatives" that are actually another place
+// (归元宗祖师殿 under 归元宗祖师殿前, 断桥下 under 断桥). Time-of-day labels stay.
+func isIndependentSceneName(name, parent string) bool {
+	name = strings.TrimSpace(name)
+	parent = strings.TrimSpace(parent)
+	if name == "" || parent == "" || strings.EqualFold(name, parent) {
+		return false
+	}
+	if isSceneTimeVariantName(name) {
+		return false
+	}
+	if services.AreDistinctDirectionalPlaces(name, parent) {
+		return true
+	}
+	for _, mark := range []string{"殿", "桥", "阵", "门", "廊", "坪", "台", "渊", "洞", "堂", "楼", "阁", "院"} {
+		if strings.Contains(name, mark) {
+			return true
+		}
+	}
+	return false
 }

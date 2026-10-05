@@ -36,6 +36,7 @@ const {
   crewJob,
   crewModalOpen,
   openCrewModal,
+  autoVideoRun,
 } = useNovalyInject()
 
 const configOpen = ref(false)
@@ -70,14 +71,18 @@ function jobStatusLabel(status: string) {
   return status
 }
 
+const autoVideoBusy = computed(() =>
+  ['running', 'pause_requested'].includes(autoVideoRun.value?.status || ''),
+)
 const runningJobCount = computed(
   () =>
     visibleImageGenJobs.value.filter(j => j.status === 'pending' || j.status === 'running').length
     + stylizeJobs.value.filter(j => j.status === 'running').length
-    + (crewJob.value?.status === 'running' && !crewModalOpen.value ? 1 : 0),
+    + (crewJob.value?.status === 'running' && !crewModalOpen.value ? 1 : 0)
+    + (autoVideoBusy.value ? 1 : 0),
 )
 const totalJobCount = computed(
-  () => visibleImageGenJobs.value.length + stylizeJobs.value.length + (showCrewTask.value ? 1 : 0),
+  () => visibleImageGenJobs.value.length + stylizeJobs.value.length + (showCrewTask.value ? 1 : 0) + (autoVideoBusy.value ? 1 : 0),
 )
 
 const showCrewTask = computed(() => crewJob.value?.status === 'running' && !crewModalOpen.value)

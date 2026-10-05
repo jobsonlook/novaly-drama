@@ -1516,7 +1516,7 @@ func (cc *CrewController) listSceneGridCellsForScene(projectID uint, sceneName s
 		}
 		if !hit {
 			base := services.SceneGridBaseName(g.Name)
-			if base != "" && (base == sceneName || strings.Contains(base, sceneName) || strings.Contains(sceneName, base)) {
+			if services.SceneGridTitleMatchesScene(base, sceneName) {
 				hit = true
 			}
 		}
@@ -1785,6 +1785,9 @@ func (cc *CrewController) upsertExtractedResources(projectID uint, assets []crew
 			}
 			if len(updates) > 0 {
 				_ = cc.DB.Model(&existing).Updates(updates).Error
+			}
+			if item.ParentID == 0 && !item.IsDerivative && existing.ParentID != nil && *existing.ParentID > 0 {
+				_ = cc.DB.Model(&existing).Update("parent_id", nil).Error
 			}
 			item.ResourceID = existing.ID
 			continue

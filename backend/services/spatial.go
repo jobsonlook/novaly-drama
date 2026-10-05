@@ -48,6 +48,8 @@ var (
 	crowdNameRE   = regexp.MustCompile(`杀手|路人|群演|群众|宾客|保镖|手下`)
 	gridNameRE    = regexp.MustCompile(`([\p{Han}]{2,12})[（(](?:左前|中前|右前|左中|中中|右中|左后|中后|右后)[）)]`)
 	speakerNameRE = regexp.MustCompile(`([\p{Han}]{2,12})\s*说[：:「]`)
+	childGroupRE  = regexp.MustCompile(`(?:[零一二三四五六七八九十百千万两\d]+名?)(?:孩童|孩子|儿童|小孩)`)
+	childCountRE  = regexp.MustCompile(`^([零一二三四五六七八九十百千万两\d]+)名?(?:孩童|孩子|儿童|小孩)`)
 )
 
 // ScriptHasSpatialSlot reports whether a shot script already uses the 3×3
@@ -264,6 +266,41 @@ func EnsureMentionedCharacterPicks(picks []RefMatchPick, candidates []RefMatchCa
 			}
 		}
 		if !hit {
+			continue
+		}
+		picks = append(picks, RefMatchPick{ID: c.ID, Label: c.Name})
+		haveID[c.ID] = true
+	}
+	return picks
+}
+
+func normalizeChildGroupName(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.NewReplacer("孩童", "孩子", "儿童", "孩子", "小孩", "孩子").Replace(s)
+	return s
+}
+
+// EnsureExplicitGroupCharacterPicks keeps an explicitly counted group sheet,
+// e.g. resource「六名孩童」for script「另外六名孩子」, even when the model skips it.
+func EnsureExplicitGroupCharacterPicks(picks []RefMatchPick, candidates []RefMatchCandidate, script string) []RefMatchPick {
+	normalizedScript := normalizeChildGroupName(script)
+	haveID := map[uint]bool{}
+	for _, p := range picks {
+		haveID[p.ID] = true
+	}
+	for _, c := range candidates {
+		if haveID[c.ID] || (c.Type != "character" && c.Type != "role") {
+			continue
+		}
+		name := normalizeChildGroupName(c.Name)
+		group := childGroupRE.FindString(name)
+		countMatch := childCountRE.FindStringSubmatch(name)
+		matched := group != "" && strings.Contains(normalizedScript, group)
+		if !matched && len(countMatch) > 1 {
+			flexible := regexp.MustCompile(regexp.QuoteMeta(countMatch[1]) + `名?[^，。；;\n]{0,12}孩子`)
+			matched = flexible.MatchString(normalizedScript)
+		}
+		if !matched {
 			continue
 		}
 		picks = append(picks, RefMatchPick{ID: c.ID, Label: c.Name})

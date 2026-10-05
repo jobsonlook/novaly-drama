@@ -41,6 +41,7 @@ func (rc *ResourceController) List(c *gin.Context) {
 
 	counts := gin.H{
 		"all":       countLibraryResources(rc.DB, projectID, "", "", hideSceneGridCells, 0, true),
+		"missing":   countLibraryResources(rc.DB, projectID, "missing-image", "", hideSceneGridCells, 0, true),
 		"character": countLibraryResources(rc.DB, projectID, "character", "", hideSceneGridCells, 0, true),
 		"scene":     countLibraryResources(rc.DB, projectID, "scene", "", hideSceneGridCells, 0, true),
 		"prop":      countLibraryResources(rc.DB, projectID, "prop", "", hideSceneGridCells, 0, true),
@@ -99,7 +100,11 @@ func libraryResourcesQuery(db *gorm.DB, projectID uint, typ, search string, hide
 	} else if hideDerivatives {
 		q = q.Where("parent_id IS NULL")
 	}
-	if parentID == 0 && typ != "" && typ != "all" {
+	if parentID == 0 && typ == "missing-image" {
+		q = q.Where("type <> ?", "video").
+			Where("COALESCE(image_path, '') = ''").
+			Where("COALESCE(stylized_image_path, '') = ''")
+	} else if parentID == 0 && typ != "" && typ != "all" {
 		q = q.Where("type = ?", typ)
 	}
 	if search != "" {

@@ -378,7 +378,10 @@ func (b *Browser) collectAllFallbackAPIs(ctx context.Context) (apis []string, vi
 	if err != nil {
 		log.Printf("generate_video: collect fallback_api: %v", err)
 	}
-	apis = uniqueStrings(pageApis)
+	// Browser-level CDP capture is needed when the page hook misses
+	// /im/chain/single. It is task-local because GenerateVideoViaUI clears it
+	// immediately before submitting each prompt.
+	apis = uniqueStrings(append(pageApis, b.snapshotCapturedFallbackAPIs()...))
 	vid = pageVid
 	return apis, vid
 }

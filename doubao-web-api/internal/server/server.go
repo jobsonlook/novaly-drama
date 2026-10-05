@@ -73,6 +73,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /api/v3/images/proxy", s.handleImageProxy)
+	mux.HandleFunc("GET /api/v3/videos/proxy", s.handleVideoProxy)
 	mux.HandleFunc("POST /api/v3/images/uploads", s.handleImageUpload)
 	mux.HandleFunc("POST /api/v3/files/uploads", s.handleFileUpload)
 	mux.HandleFunc("POST /api/v3/images/generations", s.handleGenerateImages)
@@ -654,7 +655,9 @@ func (s *Server) fetchMediaBytes(ctx context.Context, rawURL string) ([]byte, er
 	}
 	req.Header.Set("Referer", "https://www.doubao.com/chat/")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-	client := &http.Client{Timeout: 3 * time.Minute}
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Encoding", "identity")
+	client := &http.Client{Timeout: 10 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -663,7 +666,18 @@ func (s *Server) fetchMediaBytes(ctx context.Context, rawURL string) ([]byte, er
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 80<<20))
+	const maxVideoBytes = 120 << 20
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxVideoBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxVideoBytes {
+		return nil, fmt.Errorf("video exceeds %dMB", maxVideoBytes>>20)
+	}
+	if cl := resp.ContentLength; cl > 0 && int64(len(data)) < cl {
+		return nil, fmt.Errorf("truncated video: got %d / %d bytes", len(data), cl)
+	}
+	return data, nil
 }
 
 // consumeVideoQuotaOnSuccess decrements Seedance remaining for the leased account.
@@ -713,6 +727,28 @@ func (s *Server) restartDefaultChrome(reason string) {
 	}
 	s.sessionSwitchPending.Store(false)
 	log.Printf("chrome: auto-restart ok (%s)", reason)
+}
+
+func (s *Server) handleVideoProxy(w http.ResponseWriter, r *http.Request) {
+	rawURL := r.URL.Query().Get("url")
+	if rawURL == "" {
+		writeError(w, http.StatusBadRequest, "url query parameter is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	data, err := s.fetchMediaBytes(ctx, rawURL)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "fetch video: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(data); err != nil {
+		log.Printf("proxy video write failed: %v", err)
+	}
 }
 
 func (s *Server) handleImageProxy(w http.ResponseWriter, r *http.Request) {
@@ -774,7 +810,15 @@ func (s *Server) buildProxyURL(r *http.Request, imageURL string) string {
 }
 
 func (s *Server) buildVideoProxyURL(r *http.Request, videoURL string) string {
-	return s.buildProxyURL(r, videoURL)
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	host := r.Host
+	if host == "" {
+		host = "127.0.0.1:" + s.cfg.Port
+	}
+	return fmt.Sprintf("%s://%s/api/v3/videos/proxy?url=%s", scheme, host, url.QueryEscape(videoURL))
 }
 
 func isAllowedMediaHost(u *url.URL) bool {
@@ -791,6 +835,7 @@ func isAllowedMediaHost(u *url.URL) bool {
 		strings.HasSuffix(host, "douyin.com") ||
 		strings.HasSuffix(host, "doubao.com") ||
 		strings.HasSuffix(host, "snssdk.com") ||
+		strings.HasSuffix(host, "ixigua.com") ||
 		strings.Contains(host, "tos-cn-")
 }
 
